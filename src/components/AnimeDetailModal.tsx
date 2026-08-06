@@ -1,15 +1,15 @@
-import React from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X, ArrowLeft, Play, ExternalLink } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { X, ArrowLeft, ExternalLink } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
-import { statusLabel, type EpisodeSource } from "@/lib/api";
+import { statusLabel, fetchWatchStreams, type WatchStream, type WatchResponse } from "@/lib/api";
 import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { recordWatch } from "@/hooks/use-watch-history";
+import Hls from "hls.js";
 import type { JikanAnime } from "@/types/jikan";
 
 interface Props {
@@ -22,21 +22,40 @@ interface Props {
 // otherwise render an unusable number of buttons.
 const MAX_EPISODE_BUTTONS = 100;
 
+/** Pick the best stream to autoplay: prefer the Anivexa proxy (hls-redirect),
+ *  then direct HLS, then mp4/direct, then embedded players. */
+function pickBestStream(streams: WatchStream[]): WatchStream | undefined {
+  const rank = (s: WatchStream) => {
+    switch (s.type) {
+      case "hls-redirect": return 0;
+      case "hls": return 1;
+      case "mp4":
+      case "direct": return 2;
+      case "embed": return 3;
+      default: return 4;
+    }
+  };
+  return [...streams].sort((a, b) => rank(a) - rank(b))[0];
+}
+
 const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const navigate = useNavigate();
   const [currentView, setCurrentView] = useState<'details' | 'player'>('details');
   const [episode, setEpisode] = useState(1);
-  const [videoSources, setVideoSources] = useState<EpisodeSource[]>([]);
-  const [currentSource, setCurrentSource] = useState<EpisodeSource | null>(null);
+  const [activeAudio, setActiveAudio] = useState<'sub' | 'dub'>('sub');
+  const [watch, setWatch] = useState<WatchResponse | null>(null);
+  const [currentSource, setCurrentSource] = useState<WatchStream | null>(null);
   const [loading, setLoading] = useState(false);
   const [playerStatus, setPlayerStatus] = useState('');
   const [episodeJump, setEpisodeJump] = useState('');
   const episodeLoadSeqRef = useRef(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   const animeId = open ? anime?.mal_id : null;
   // Full record + episode list come from the backend via the React Query cache.
   const { data: fullAnime, isLoading: detailLoading } = useAnimeDetails(animeId);
-  const { data: episodeList = [], isLoading: episodesLoading, refetch: refetchEpisodes } = useEpisodes(animeId);
+  const { data: episodeList = [], isLoading: episodesLoading } = useEpisodes(animeId);
 
   const d = fullAnime ?? anime;
 
@@ -45,7 +64,7 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     if (!open || !anime) {
       setCurrentView('details');
       setEpisode(1);
-      setVideoSources([]);
+      setWatch(null);
       setCurrentSource(null);
       setPlayerStatus('');
       setEpisodeJump('');
@@ -53,6 +72,16 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
       return;
     }
   }, [open, anime]);
+
+  // Destroy the hls.js instance when the source changes or the modal closes.
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, []);
 
   const episodeCount = Math.max(episodeList.length, d?.episodes ?? 0, 1);
 
@@ -70,63 +99,65 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     setEpisodeJump('');
   };
 
-  const loadAndPlayEpisode = async (episodeNumber: number) => {
-    if (!d) {
+  const loadAndPlayEpisode = useCallback(async (episodeNumber: number, audio: 'sub' | 'dub' = activeAudio) => {
+    if (!d?.mal_id) {
       setPlayerStatus('Error: No anime details available');
       return;
     }
 
-    const ep = episodeList.find((e) => e.number === episodeNumber);
-
-    // Sources are usually already in the episode payload; if the list is
-    // empty, try once more before giving up.
-    let sources = ep?.sources ?? [];
-    if (sources.length === 0) {
-      setPlayerStatus('Loading sources...');
-      setLoading(true);
-      const seq = ++episodeLoadSeqRef.current;
-      try {
-        const refreshed = await refetchEpisodes();
-        if (seq !== episodeLoadSeqRef.current) return;
-        const fresh = refreshed.data?.find((e) => e.number === episodeNumber);
-        sources = fresh?.sources ?? [];
-      } catch (error) {
-        if (seq === episodeLoadSeqRef.current) {
-          console.error('Error loading episodes:', error);
-        }
-      } finally {
-        if (seq === episodeLoadSeqRef.current) setLoading(false);
-      }
-    }
-
-    setEpisode(episodeNumber);
-    setCurrentView('player');
-    setVideoSources(sources);
+    const seq = ++episodeLoadSeqRef.current;
+    setLoading(true);
+    setPlayerStatus('Loading streams...');
     setCurrentSource(null);
 
-    if (sources.length === 0) {
-      setPlayerStatus('No video sources found for this episode. The episode might not be available.');
+    try {
+      // Streams come from OUR backend (/api/watch), which proxies Anivexa.
+      const result = await fetchWatchStreams(d.mal_id, episodeNumber, { audio });
+      if (seq !== episodeLoadSeqRef.current) return;
+
+      setEpisode(episodeNumber);
+      setActiveAudio(result.audio || audio);
+      setWatch(result);
+      setCurrentView('player');
+
+      if (result.streams.length === 0) {
+        setPlayerStatus('No video streams found for this episode. Try another provider or episode.');
+        toast({
+          title: "Streaming Error",
+          description: "No streams were returned for this episode. Please try again later.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const best = pickBestStream(result.streams);
+      if (best) {
+        playSource(best);
+      }
+    } catch (error) {
+      if (seq !== episodeLoadSeqRef.current) return;
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setPlayerStatus(`Error loading episode: ${message}`);
       toast({
         title: "Streaming Error",
-        description: "No video sources found for this episode. Please try again later.",
-        variant: "destructive"
+        description: message,
+        variant: "destructive",
       });
-      return;
+    } finally {
+      if (seq === episodeLoadSeqRef.current) setLoading(false);
     }
+  }, [d, activeAudio]);
 
-    // Prioritize embed sources over direct sources
-    const prioritizedSource =
-      sources.find((s) => s.type === 'embed') ||
-      sources.find((s) => s.type === 'direct') ||
-      sources[0];
-    if (prioritizedSource) {
-      playSource(prioritizedSource);
+  const playSource = (source: WatchStream) => {
+    // Switching sources tears down any active hls.js session first.
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
     }
-  };
-
-  const playSource = (source: EpisodeSource) => {
     setCurrentSource(source);
-    setPlayerStatus(`Playing from ${source.provider || 'Backend'}${source.quality ? ` (${source.quality})` : ''}`);
+    setPlayerStatus(
+      `Playing from ${watch?.provider ?? 'provider'}${source.server ? ` · ${source.server}` : ''}`
+    );
     // Remember where the user left off (drives the Continue Watching row).
     if (d?.mal_id) {
       recordWatch({
@@ -138,32 +169,72 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     }
   };
 
-  const renderPlayer = () => {
-    if (!currentSource) return null;
+  // Attach hls.js once a video element + HLS source are both present.
+  useEffect(() => {
+    const video = videoRef.current;
+    const source = currentSource;
+    if (!video || !source) return;
+    const isHls = source.type === 'hls' || source.type === 'hls-redirect';
+    if (!isHls) return;
 
-    if (currentSource.type === 'direct') {
+    if (Hls.isSupported()) {
+      const hls = new Hls();
+      hls.loadSource(source.url);
+      hls.attachMedia(video);
+      hlsRef.current = hls;
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (data.fatal) {
+          setPlayerStatus('Playback error — trying another source may help.');
+        }
+      });
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS
+      video.src = source.url;
+    } else {
+      setPlayerStatus('This browser cannot play HLS streams.');
+    }
+  }, [currentSource]);
+
+  const renderPlayer = () => {
+    const source = currentSource;
+    if (!source) return null;
+
+    const isHls = source.type === 'hls' || source.type === 'hls-redirect';
+    if (isHls || source.type === 'mp4' || source.type === 'direct') {
       return (
         <video
-          src={currentSource.url}
+          key={source.url}
+          ref={videoRef}
           controls
           autoPlay
           className="w-full h-full"
+          src={isHls ? undefined : source.url}
           onError={() => {
             setPlayerStatus('Error playing video. Try another source.');
             toast({
               title: "Playback Error",
               description: "Failed to play the video. The source may be invalid or offline.",
-              variant: "destructive"
+              variant: "destructive",
             });
           }}
         >
+          {(source.subtitles ?? []).map((track, i) => (
+            <track
+              key={i}
+              kind="subtitles"
+              src={track.url}
+              srcLang={track.srclang || 'en'}
+              label={track.label || `Subtitle ${i + 1}`}
+              default={track.default || i === 0}
+            />
+          ))}
           Your browser does not support the video tag.
         </video>
       );
     }
     return (
       <iframe
-        src={currentSource.url}
+        src={source.url}
         title={`${d?.title} Episode ${episode}`}
         className="w-full h-full border-none"
         allowFullScreen
@@ -338,37 +409,66 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
           {/* Player View */}
           {currentView === 'player' && (
             <div className="space-y-6">
+              {/* Audio + provider bar */}
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 p-1">
+                  {(['sub', 'dub'] as const).map((a) => (
+                    <button
+                      key={a}
+                      onClick={() => { if (a !== activeAudio) loadAndPlayEpisode(episode, a); }}
+                      className={cn(
+                        "px-3 py-1 rounded-md text-sm font-semibold uppercase transition",
+                        activeAudio === a ? "bg-purple-600 text-white" : "text-zinc-400 hover:text-white"
+                      )}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+                {watch && (
+                  <span className="text-sm text-zinc-400">
+                    Provider: <span className="text-purple-300 font-semibold">{watch.provider}</span>
+                    {watch.servers.length > 0 && <span> · servers: {watch.servers.join(", ")}</span>}
+                  </span>
+                )}
+              </div>
+
               {/* Video Player */}
               <div className="relative aspect-video w-full rounded-xl overflow-hidden border-2 border-[#202023] shadow-lg bg-black">
-                {renderPlayer()}
+                {loading && !currentSource ? (
+                  <div className="absolute inset-0 flex items-center justify-center text-white/80">
+                    <span className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mr-3" />
+                    Loading streams...
+                  </div>
+                ) : (
+                  renderPlayer()
+                )}
                 {playerStatus && (
-                  <div className="absolute bottom-4 left-4 bg-black/75 text-white px-3 py-1 rounded text-sm">
+                  <div className="absolute bottom-4 left-4 bg-black/75 text-white px-3 py-1 rounded text-sm max-w-[80%] truncate">
                     {playerStatus}
                   </div>
                 )}
               </div>
 
               {/* Source Selection */}
-              {videoSources.length > 0 && (
+              {watch && watch.streams.length > 0 && (
                 <div className="space-y-3">
                   <h4 className="text-white font-semibold">Available Sources:</h4>
                   <div className="flex flex-wrap gap-3">
-                    {videoSources.map((source, index) => (
+                    {watch.streams.map((stream, index) => (
                       <Button
                         key={index}
-                        onClick={() => playSource(source)}
-                        variant={currentSource === source ? "default" : "outline"}
+                        onClick={() => playSource(stream)}
+                        variant={currentSource === stream ? "default" : "outline"}
                         className={cn(
                           "font-semibold",
-                          currentSource === source
+                          currentSource === stream
                             ? "bg-blue-600 hover:bg-blue-700 text-white"
                             : "bg-zinc-700 hover:bg-zinc-600 text-white border-zinc-600"
                         )}
                       >
-                        Source {index + 1} ({(source.type || 'embed').toUpperCase()})
-                        <span className="ml-1 text-xs opacity-75">
-                          - {source.provider || 'Backend'}
-                        </span>
+                        {(stream.server || stream.type || "source").toUpperCase()}
+                        <span className="ml-1 text-xs opacity-75">({stream.type})</span>
                       </Button>
                     ))}
                   </div>

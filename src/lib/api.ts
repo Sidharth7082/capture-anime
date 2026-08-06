@@ -382,3 +382,46 @@ export async function fetchAnimeDetailExtras(id: number | string): Promise<Anime
     episodeCount: toNum(data.episodeCount ?? data.episodes) ?? null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Watch streams (Anivexa via the backend — never called directly).
+// ---------------------------------------------------------------------------
+export interface WatchStream {
+  url: string;
+  type?: "hls" | "hls-redirect" | "mp4" | "embed" | "direct";
+  server?: string | null;
+  embedUrl?: string | null;
+  referer?: string | null;
+  subtitles?: SubtitleTrack[];
+  priority?: number | null;
+  isActive?: boolean | null;
+}
+
+export interface SubtitleTrack {
+  url: string;
+  label?: string;
+  srclang?: string | null;
+  default?: boolean;
+  source?: string | null;
+}
+
+export interface WatchResponse {
+  provider: string;
+  episode: number;
+  audio: "sub" | "dub";
+  streams: WatchStream[];
+  subtitles: SubtitleTrack[];
+  servers: string[];
+}
+
+/** GET /api/watch/:animeId/:episode — streams for one episode. */
+export async function fetchWatchStreams(
+  animeId: number | string,
+  episode: number,
+  opts: { provider?: string; audio?: "sub" | "dub" } = {},
+): Promise<WatchResponse> {
+  return apiFetch<WatchResponse>(`/api/watch/${animeId}/${episode}`, {
+    provider: opts.provider,
+    audio: opts.audio,
+  });
+}
