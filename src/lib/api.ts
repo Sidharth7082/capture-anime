@@ -58,18 +58,22 @@ async function apiFetch<T>(path: string, params?: QueryParams): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Defensive normalization — the backend's item shape is treated as
-// unspecified: we accept the common field name variants (id/mal_id, image/
-// poster/cover, description/synopsis, studio(s), genres as strings or
-// {name} objects, …) and always produce the app's internal JikanAnime shape
-// so every existing component keeps working unchanged.
+// Normalization — maps the backend's exact response schema (AniList-style
+// field names: titleRomaji, coverImageLarge, averageScore 0-100, format,
+// seasonYear, startDate/endDate, favourites, videoUrl …) into the app's
+// internal JikanAnime shape so every component renders correctly.
 // ---------------------------------------------------------------------------
 function pickImage(raw: Record<string, unknown>): JikanImages {
+  // Primary: the backend's coverImageLarge / coverImageMedium fields.
+  // Fallbacks retained for robustness against future field renames.
+  const large = raw.coverImageLarge || raw.coverImageMedium;
+  const small = raw.coverImageMedium || large;
   const jpgImage =
     raw.images && typeof raw.images === "object"
       ? (raw.images as Record<string, unknown>).jpg
       : undefined;
   const jpgImageUrl =
+    large ||
     (jpgImage && (jpgImage as Record<string, unknown>).image_url) ||
     (raw.images as Record<string, unknown> | undefined)?.image_url ||
     raw.image ||
@@ -85,12 +89,8 @@ function pickImage(raw: Record<string, unknown>): JikanImages {
   return {
     jpg: {
       image_url: String(jpgImageUrl),
-      small_image_url: String(
-        (jpgImage && (jpgImage as Record<string, unknown>).small_image_url) || jpgImageUrl
-      ),
-      large_image_url: String(
-        (jpgImage && (jpgImage as Record<string, unknown>).large_image_url) || jpgImageUrl
-      ),
+      small_image_url: String(small || jpgImageUrl),
+      large_image_url: String(large || jpgImageUrl),
     },
     webp: webp
       ? {
@@ -128,40 +128,65 @@ const toNum = (v: unknown): number | undefined => {
   return Number.isFinite(n) && v !== "" && v != null ? n : undefined;
 };
 
+/** Map backend media status enums to display-friendly labels. */
+const STATUS_LABELS: Record<string, string> = {
+  RELEASING: "Airing",
+  FINISHED: "Finished",
+  NOT_YET_RELEASED: "Not Yet Released",
+  CANCELLED: "Cancelled",
+  HIATUS: "On Hiatus",
+};
+
 export function normalizeAnime(raw: unknown): JikanAnime {
   const item = (raw ?? {}) as Record<string, unknown>;
   const id = Number(item.id ?? item.mal_id ?? item.animeId ?? 0);
-  const title = String(item.title ?? item.name ?? item.title_english ?? "Untitled");
-  const aired = item.aired && typeof item.aired === "object"
-    ? (item.aired as Record<string, unknown>)
-    : { from: item.startDate ?? item.start_date, to: item.endDate ?? item.end_date, string: item.aired_string };
+  const title = String(
+    item.titleRomaji ?? item.titleEnglish ?? item.titleNative ?? item.title ?? item.name ?? "Untitled"
+  );
+  const status = item.status ? String(item.status) : undefined;
+  const startDate = item.startDate ?? item.start_date;
+  const endDate = item.endDate ?? item.end_date;
+  const durationMinutes = toNum(item.durationMinutes);
+  const averageScore = toNum(item.averageScore);
+  // startDate/endDate come back with a time component; show YYYY-MM-DD.
+  const fmtDate = (v: unknown) => (v ? String(v).slice(0, 10) : null);
+  const aired =
+    startDate || endDate
+      ? {
+          from: fmtDate(startDate),
+          to: fmtDate(endDate),
+          string: `${fmtDate(startDate) ?? "?"} to ${fmtDate(endDate) ?? "?"}`,
+        }
+      : undefined;
   return {
     mal_id: id,
     url: String(item.url ?? item.mal_url ?? ""),
     images: pickImage(item),
     title,
-    title_english: item.title_english ? String(item.title_english) : undefined,
-    title_japanese: item.title_japanese ? String(item.title_japanese) : undefined,
-    type: item.type ? String(item.type) : undefined,
+    title_english: item.titleEnglish ? String(item.titleEnglish) : undefined,
+    title_japanese: item.titleNative ? String(item.titleNative) : undefined,
+    // The backend calls it "format" (TV / MOVIE / OVA / …).
+    type: item.format ? String(item.format) : item.type ? String(item.type) : undefined,
     source: item.source ? String(item.source) : undefined,
-    episodes: toNum(item.episodes ?? item.episode_count),
-    status: item.status ? String(item.status) : undefined,
-    airing: Boolean(item.airing ?? item.isAiring ?? false),
-    aired: aired.from || aired.to || aired.string
-      ? { from: aired.from ? String(aired.from) : null, to: aired.to ? String(aired.to) : null, string: aired.string ? String(aired.string) : undefined }
-      : undefined,
-    duration: item.duration ? String(item.duration) : undefined,
+    episodes: toNum(item.episodes ?? item.episodeCount ?? item.episode_count),
+    status,
+    airing: status === "RELEASING" || Boolean(item.airing ?? item.isAiring ?? false),
+    aired,
+    // durationMinutes is a number; display as "N min".
+    duration: durationMinutes ? `${durationMinutes} min` : item.duration ? String(item.duration) : undefined,
     rating: item.rating ? String(item.rating) : undefined,
-    score: toNum(item.score ?? item.rating_score ?? item.ratingValue),
-    scored_by: toNum(item.scored_by ?? item.score_count),
+    // averageScore is 0–100 on the backend; the UI expects 0–10.
+    score: averageScore != null ? Math.round((averageScore / 10) * 100) / 100 : toNum(item.score),
+    scored_by: toNum(item.scored_by ?? item.score_count ?? item.meanScore),
     rank: toNum(item.rank),
     popularity: toNum(item.popularity),
     members: toNum(item.members),
-    favorites: toNum(item.favorites),
-    synopsis: item.synopsis ?? item.description ?? item.overview ? String(item.synopsis ?? item.description ?? item.overview) : undefined,
+    // Backend uses British spelling: "favourites".
+    favorites: toNum(item.favourites ?? item.favorites),
+    synopsis: String(item.description ?? item.synopsis ?? item.overview ?? "") || undefined,
     background: item.background ? String(item.background) : undefined,
     season: item.season ? String(item.season) : undefined,
-    year: toNum(item.year ?? item.releaseYear ?? item.startYear),
+    year: toNum(item.seasonYear ?? item.year ?? item.releaseYear),
     studios: pickStudios(item),
     genres: pickGenres(item),
     themes: item.themes ? pickGenres({ genres: item.themes }) : undefined,
@@ -174,6 +199,11 @@ export function normalizeAnime(raw: unknown): JikanAnime {
         }
       : undefined,
   };
+}
+
+/** Display label for a backend status enum (or the raw value). */
+export function statusLabel(status?: string | null): string {
+  return status ? STATUS_LABELS[status] ?? status : "Unknown";
 }
 
 /** Normalize a backend list payload into the internal JikanPage shape. */
@@ -226,11 +256,16 @@ function normalizeEpisodes(raw: unknown): BackendEpisode[] {
     const sources: EpisodeSource[] = rawSources
       .map((s): EpisodeSource | null => {
         const src = (s ?? {}) as Record<string, unknown>;
-        const url = String(src.url ?? src.embed ?? src.file ?? src.videoUrl ?? src.source ?? "");
+        // The backend returns a single direct `videoUrl` per episode.
+        const url = String(src.videoUrl ?? src.url ?? src.embed ?? src.file ?? src.source ?? "");
         if (!url) return null;
+        const fromVideoUrl = Boolean(src.videoUrl);
         return {
           url,
-          type: (src.type as "embed" | "direct" | undefined) ?? (String(src.url ?? "").includes("embed") ? "embed" : "embed"),
+          // Direct media URLs must play in the <video> element, not an iframe.
+          type:
+            (src.type as "embed" | "direct" | undefined) ??
+            (fromVideoUrl ? "direct" : "embed"),
           quality: src.quality ? String(src.quality) : undefined,
           provider: src.provider ? String(src.provider) : src.server ? String(src.server) : "Backend",
         };
@@ -240,7 +275,7 @@ function normalizeEpisodes(raw: unknown): BackendEpisode[] {
       id,
       number: Number(ep.number ?? ep.episode_number ?? ep.ep ?? index + 1),
       title: ep.title ? String(ep.title) : null,
-      aired: ep.aired ? String(ep.aired) : null,
+      aired: ep.airDate ? String(ep.airDate) : ep.aired ? String(ep.aired) : null,
       score: toNum(ep.score),
       sources,
     };
@@ -251,17 +286,33 @@ function normalizeEpisodes(raw: unknown): BackendEpisode[] {
 // Endpoints (public API)
 // ---------------------------------------------------------------------------
 
-/** Main list: GET /api/anime (supports page/limit/letter/sort). */
+/** Main list: GET /api/anime (supports page/limit/status/format/sort). */
 export function fetchTopAnime(page = 1, sort: string | undefined = "score_desc") {
   return apiFetch<unknown>("/api/anime", { page, sort }).then(normalizeAnimePage);
 }
 
-/** Browse by first letter (letter = "all" lists everything). */
+/**
+ * Browse by first letter. The backend has no `letter` filter (unknown query
+ * params are stripped), so we fetch the catalog sorted by title and filter
+ * client-side by the romaji title prefix. "all" lists everything.
+ */
 export function fetchAnimeByLetter(letter: string, page = 1) {
-  return apiFetch<unknown>("/api/anime", letter === "all" ? { page } : { page, letter }).then(normalizeAnimePage);
+  return apiFetch<unknown>("/api/anime", {
+    page,
+    limit: 100,
+    sort: "title_asc",
+  }).then((body) => {
+    const pageData = normalizeAnimePage(body);
+    if (letter === "all") return pageData;
+    const needle = letter.toLowerCase();
+    return {
+      ...pageData,
+      data: pageData.data.filter((a) => a.title.toLowerCase().startsWith(needle)),
+    };
+  });
 }
 
-/** GET /api/anime/:id */
+/** GET /api/anime/:id (detail). Returns the normalized anime. */
 export async function fetchAnimeDetails(id: number | string) {
   const body = await apiFetch<unknown>(`/api/anime/${id}`);
   const data = (body as Record<string, unknown>).data ?? body;
@@ -300,9 +351,34 @@ export function fetchAnimeByStudio(studioId: number | string, page = 1) {
   return apiFetch<unknown>(`/api/anime/studio/${studioId}`, { page }).then(normalizeAnimePage);
 }
 
-/** GET /api/episodes/:animeId */
+/** GET /api/episodes/:animeId (limit 100 = backend max, so long series
+ *  aren't silently truncated at the 20-item default). */
 export function fetchEpisodes(animeId: number | string) {
-  return apiFetch<unknown>(`/api/episodes/${animeId}`).then(normalizeEpisodes);
+  return apiFetch<unknown>(`/api/episodes/${animeId}`, { limit: 100 }).then(normalizeEpisodes);
 }
 
 export { API_BASE };
+
+// ---------------------------------------------------------------------------
+// Detail extras (GET /api/anime/:id also returns characters, rating,
+// episodeCount — surfaced so the UI can show them).
+// ---------------------------------------------------------------------------
+export interface AnimeDetailExtras {
+  anime: JikanAnime;
+  characters: import("@/types/jikan").CharacterEntry[];
+  rating: import("@/types/jikan").RatingInfo | null;
+  episodeCount: number | null;
+}
+
+export async function fetchAnimeDetailExtras(id: number | string): Promise<AnimeDetailExtras> {
+  const body = await apiFetch<unknown>(`/api/anime/${id}`);
+  const data = ((body as Record<string, unknown>).data ?? body) as Record<string, unknown>;
+  return {
+    anime: normalizeAnime(data),
+    characters: Array.isArray(data.characters) ? (data.characters as import("@/types/jikan").CharacterEntry[]) : [],
+    rating: data.rating && typeof data.rating === "object"
+      ? (data.rating as import("@/types/jikan").RatingInfo)
+      : null,
+    episodeCount: toNum(data.episodeCount ?? data.episodes) ?? null,
+  };
+}

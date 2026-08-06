@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
+import { useAnimeDetails, useEpisodes, useAnimeDetailExtras } from "@/hooks/use-anime-queries";
+import { statusLabel } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -40,6 +41,8 @@ const AnimeDetailPage = () => {
 
   const { data: anime, isLoading, isError } = useAnimeDetails(animeId || null);
   const { data: episodes = [], isLoading: episodesLoading } = useEpisodes(animeId || null);
+  const { data: detailExtras } = useAnimeDetailExtras(animeId || null);
+  const characters = detailExtras?.characters ?? [];
 
   const posterUrl = anime?.images?.webp?.large_image_url || anime?.images?.jpg?.large_image_url;
   usePageMeta(
@@ -158,7 +161,7 @@ const AnimeDetailPage = () => {
                     </Badge>
                   )}
                   <Badge variant="secondary" className={anime.airing ? "bg-green-100 text-green-700" : ""}>
-                    {anime.status || "Unknown"}
+                    {statusLabel(anime.status)}
                   </Badge>
                 </div>
 
@@ -181,6 +184,9 @@ const AnimeDetailPage = () => {
                 {(anime.studios?.length ?? 0) > 0 && (
                   <p className="text-sm text-zinc-600">
                     <span className="font-semibold">Studios:</span> {anime.studios!.map((s) => s.name).join(", ")}
+                    {detailExtras?.rating?.count ? (
+                      <span className="text-zinc-400"> · {detailExtras.rating.count.toLocaleString()} ratings</span>
+                    ) : null}
                   </p>
                 )}
 
@@ -208,6 +214,38 @@ const AnimeDetailPage = () => {
               <section className="mt-10">
                 <SectionTitle icon={<Play className="w-5 h-5 text-purple-600" />}>Synopsis</SectionTitle>
                 <p className="text-zinc-700 leading-relaxed max-w-4xl">{anime.synopsis}</p>
+              </section>
+            )}
+
+            {/* Characters & Voice Actors (from the backend detail payload) */}
+            {characters.length > 0 && (
+              <section className="mt-10">
+                <SectionTitle icon={<Tv className="w-5 h-5 text-purple-600" />}>Characters & Voice Actors</SectionTitle>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {characters.map((entry) => (
+                    <div key={entry.id} className="flex gap-3 rounded-2xl bg-white/70 border border-zinc-200/80 p-3 shadow-sm">
+                      <img
+                        src={entry.imageLarge || entry.imageMedium || "/placeholder.svg"}
+                        alt={`${entry.nameFirst} ${entry.nameLast ?? ""}`.trim()}
+                        className="w-16 h-24 object-cover rounded-lg shrink-0"
+                        loading="lazy"
+                        onError={(e) => ((e.target as HTMLImageElement).src = "/placeholder.svg")}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-zinc-900 truncate">{entry.nameFirst} {entry.nameLast ?? ""}</p>
+                        <p className="text-xs text-zinc-500 mb-2 capitalize">{entry.role?.toLowerCase()}</p>
+                        {entry.voiceActors?.slice(0, 2).map((va) => (
+                          <p key={`${va.id}-${va.language}`} className="text-xs text-zinc-600 flex items-start gap-1">
+                            <span className="text-zinc-400 shrink-0">🎙</span>
+                            <span className="truncate">
+                              {va.nameFirst} {va.nameLast ?? ""} <span className="text-zinc-400">({va.language})</span>
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
 

@@ -5,7 +5,7 @@ import { X, ArrowLeft, Play, ExternalLink } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
-import type { EpisodeSource } from "@/lib/api";
+import { statusLabel, type EpisodeSource } from "@/lib/api";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { recordWatch } from "@/hooks/use-watch-history";
@@ -255,7 +255,7 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
                     </div>
                     <div>
                       <span className="text-zinc-400">Status:</span>
-                      <span className="ml-2 text-white font-semibold">{d.status || 'Unknown'}</span>
+                      <span className="ml-2 text-white font-semibold">{statusLabel(d.status)}</span>
                     </div>
                     {d.score && (
                       <div>

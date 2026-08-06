@@ -94,3 +94,31 @@ export interface JikanPage<T> {
   data: T[];
   pagination: JikanPagination;
 }
+
+// ---------------------------------------------------------------------------
+// Anime detail extras (returned by GET /api/anime/:id)
+// ---------------------------------------------------------------------------
+
+export interface VoiceActor {
+  id: number;
+  nameFirst: string;
+  nameLast: string | null;
+  language: string;
+}
+
+export interface CharacterEntry {
+  id: number;
+  nameFirst: string;
+  nameLast: string | null;
+  nameNative: string | null;
+  imageLarge: string | null;
+  imageMedium: string | null;
+  role: string;
+  sortOrder: number;
+  voiceActors: VoiceActor[];
+}
+
+export interface RatingInfo {
+  count: number;
+  average: number;
+}

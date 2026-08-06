@@ -4,7 +4,9 @@ import {
   fetchAnimeByLetter,
   fetchAnimeDetails,
   fetchEpisodes,
+  fetchAnimeDetailExtras,
   type BackendEpisode,
+  type AnimeDetailExtras,
 } from "@/lib/api";
 import type { JikanAnime, JikanPage } from "@/types/jikan";
 
@@ -63,6 +65,16 @@ export function useEpisodes(id?: number | string | null) {
   return useQuery<BackendEpisode[]>({
     queryKey: animeKeys.episodes(id ?? "none"),
     queryFn: () => fetchEpisodes(id as number | string),
+    enabled: id != null,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Full detail including characters, rating and episode count. */
+export function useAnimeDetailExtras(id?: number | string | null) {
+  return useQuery<AnimeDetailExtras>({
+    queryKey: [...animeKeys.animeDetail(id ?? "none"), "extras"],
+    queryFn: () => fetchAnimeDetailExtras(id as number | string),
     enabled: id != null,
     staleTime: 10 * 60 * 1000,
   });
