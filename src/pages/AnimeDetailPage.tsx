@@ -19,6 +19,8 @@ import {
   PlayCircle,
 } from "lucide-react";
 import { usePageMeta } from "@/hooks/use-page-meta";
+import AniListSynopsis from "@/components/AniListSynopsis";
+import { htmlToPlainText } from "@/lib/anilist-html";
 import type { JikanAnime } from "@/types/jikan";
 
 const PosterSkeleton = () => (
@@ -45,9 +47,10 @@ const AnimeDetailPage = () => {
   const characters = detailExtras?.characters ?? [];
 
   const posterUrl = anime?.images?.webp?.large_image_url || anime?.images?.jpg?.large_image_url;
+  const synopsisText = anime ? htmlToPlainText(anime.synopsis ?? "") : "";
   usePageMeta(
     anime?.title || "Anime",
-    anime?.synopsis?.slice(0, 160) || undefined,
+    synopsisText.slice(0, 160) || undefined,
     posterUrl,
     `/anime/${animeId}`
   );
@@ -62,7 +65,7 @@ const AnimeDetailPage = () => {
       "@context": "https://schema.org",
       "@type": "TVSeries",
       name: anime.title,
-      description: anime.synopsis?.slice(0, 500) || undefined,
+      description: synopsisText.slice(0, 500) || undefined,
       image: posterUrl,
       url: `${window.location.origin}/anime/${anime.mal_id}`,
       ...(anime.score ? { aggregateRating: { "@type": "AggregateRating", ratingValue: anime.score, bestRating: 10 } } : {}),
@@ -210,10 +213,14 @@ const AnimeDetailPage = () => {
             </div>
 
             {/* Synopsis */}
-            {anime.synopsis && (
+            {synopsisText && (
               <section className="mt-10">
                 <SectionTitle icon={<Play className="w-5 h-5 text-purple-600" />}>Synopsis</SectionTitle>
-                <p className="text-zinc-700 leading-relaxed max-w-4xl">{anime.synopsis}</p>
+                <AniListSynopsis
+                  html={anime.synopsis}
+                  className="text-zinc-700 leading-relaxed max-w-4xl"
+                  emptyText="No synopsis available."
+                />
               </section>
             )}
 

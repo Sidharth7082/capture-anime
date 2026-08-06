@@ -1,5 +1,6 @@
 import { Star, Play, Info, Tv, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { htmlToPlainText } from "@/lib/anilist-html";
 import type { JikanAnime } from "@/types/jikan";
 
 interface HeroBannerProps {
@@ -82,12 +83,13 @@ const HeroBanner = ({ featuredAnime, animeList, onViewDetailsClick, onGetAnother
             </div>
           )}
 
-          {/* Synopsis */}
+          {/* Synopsis (plain text so HTML tags never leak into the hero) */}
           <p className="text-base md:text-lg text-white/85 font-medium drop-shadow-sm max-w-2xl line-clamp-4">
             {featuredAnime?.synopsis
-              ? featuredAnime.synopsis.length > 300
-                ? featuredAnime.synopsis.substring(0, 300) + "..."
-                : featuredAnime.synopsis
+              ? (() => {
+                  const text = htmlToPlainText(featuredAnime.synopsis);
+                  return text.length > 300 ? text.slice(0, 300) + "..." : text;
+                })()
               : "Growing up can be tough, especially when you're a family of bears and your younger brother is a bit of a wild animal. Luckily Tish has a ridiculously huge imagination and a larger than life, imaginary friend Tash. No matter what trouble..."}
           </p>
 

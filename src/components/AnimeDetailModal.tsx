@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
 import { statusLabel, type EpisodeSource } from "@/lib/api";
+import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
 import { recordWatch } from "@/hooks/use-watch-history";
@@ -228,9 +229,11 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
               {/* Content Details */}
               <div className="flex-1 min-w-0 text-white space-y-6">
                 <DialogDescription asChild>
-                  <p className="text-neutral-200 leading-relaxed font-medium text-base">
-                    {d.synopsis || "No synopsis available."}
-                  </p>
+                  <AniListSynopsis
+                    html={d.synopsis}
+                    className="text-neutral-200 leading-relaxed font-medium text-base"
+                    emptyText="No synopsis available."
+                  />
                 </DialogDescription>
 
                 {/* Metadata */}
