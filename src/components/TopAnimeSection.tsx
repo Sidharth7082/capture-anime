@@ -36,6 +36,11 @@ const TopAnimeSection = ({ loading, animeList, onCardClick }: TopAnimeSectionPro
             </div>
           ))}
         </section>
+      ) : animeList.length <= 1 ? (
+        <div className="text-center py-16">
+          <p className="text-xl text-zinc-600">No anime available yet.</p>
+          <p className="text-zinc-500 mt-1">Check back once the backend has content.</p>
+        </div>
       ) : (
         <section className={cn(
           "mt-2 grid gap-7 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"

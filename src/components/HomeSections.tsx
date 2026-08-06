@@ -1,13 +1,7 @@
-import { AnimeRowSection, RandomAnimeRow } from "@/components/AnimeRowSection";
+import AnimeRowSection from "@/components/AnimeRowSection";
 import AnimeCard from "@/components/AnimeCard";
 import { useWatchHistory } from "@/hooks/use-watch-history";
-import {
-  fetchTopAnimeFiltered,
-  fetchAnimeByType,
-  fetchSchedule,
-  fetchUpcomingAnime,
-  fetchSeasonalAnime,
-} from "@/lib/api";
+import { fetchTrendingAnime, fetchPopularAnime, fetchRecentAnime } from "@/lib/api";
 import type { JikanAnime } from "@/types/jikan";
 
 interface HomeSectionsProps {
@@ -56,9 +50,10 @@ const ContinueWatchingRow: React.FC<{ onCardClick: (anime: JikanAnime) => void }
 };
 
 /**
- * The extra discovery rows on the homepage. Each row is its own React Query
- * query (cached 10 min), and the shared Jikan rate limiter in lib/api keeps
- * the parallel burst well under the API's request budget.
+ * Homepage discovery rows backed by the production backend
+ * (/api/anime/trending, /api/anime/popular, /api/anime/recent). Each row is
+ * its own React Query query (cached), with skeletons while loading and a
+ * silent skip when the backend has no data for that row yet.
  */
 const HomeSections: React.FC<HomeSectionsProps> = ({ onCardClick }) => {
   return (
@@ -66,61 +61,25 @@ const HomeSections: React.FC<HomeSectionsProps> = ({ onCardClick }) => {
       <ContinueWatchingRow onCardClick={onCardClick} />
       <AnimeRowSection
         title="Trending Now"
-        subtitle="Most popular this week"
+        subtitle="Most popular right now"
         queryKey={["home", "trending"]}
-        queryFn={() => fetchTopAnimeFiltered("bypopularity")}
+        queryFn={() => fetchTrendingAnime(1)}
         onCardClick={onCardClick}
       />
       <AnimeRowSection
-        title="Airing Today"
-        subtitle="New episodes airing today"
-        queryKey={["home", "airing-today"]}
-        queryFn={() => fetchSchedule()}
-        onCardClick={onCardClick}
-      />
-      <AnimeRowSection
-        title="Upcoming"
-        subtitle="Coming soon"
-        queryKey={["home", "upcoming"]}
-        queryFn={() => fetchUpcomingAnime()}
-        onCardClick={onCardClick}
-      />
-      <AnimeRowSection
-        title="Movies"
-        subtitle="Top anime films"
-        queryKey={["home", "movies"]}
-        queryFn={() => fetchAnimeByType("movie")}
-        onCardClick={onCardClick}
-      />
-      <AnimeRowSection
-        title="OVAs"
-        subtitle="Original video animations"
-        queryKey={["home", "ovas"]}
-        queryFn={() => fetchAnimeByType("ova")}
-        onCardClick={onCardClick}
-      />
-      <AnimeRowSection
-        title="Popular This Season"
-        subtitle="Most popular shows this season"
-        queryKey={["home", "popular-season"]}
-        queryFn={() => fetchSeasonalAnime()}
-        onCardClick={onCardClick}
-      />
-      <AnimeRowSection
-        title="Most Favorited"
-        subtitle="Fans' all-time favorites"
-        queryKey={["home", "favorited"]}
-        queryFn={() => fetchTopAnimeFiltered("favorite")}
+        title="Popular"
+        subtitle="Loved by the community"
+        queryKey={["home", "popular"]}
+        queryFn={() => fetchPopularAnime(1)}
         onCardClick={onCardClick}
       />
       <AnimeRowSection
         title="Recently Updated"
-        subtitle="Currently airing — refreshed as new episodes drop"
-        queryKey={["home", "recently-updated"]}
-        queryFn={() => fetchTopAnimeFiltered("airing")}
+        subtitle="Fresh episodes and additions"
+        queryKey={["home", "recent"]}
+        queryFn={() => fetchRecentAnime(1)}
         onCardClick={onCardClick}
       />
-      <RandomAnimeRow onCardClick={onCardClick} />
     </div>
   );
 };

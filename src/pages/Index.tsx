@@ -4,18 +4,14 @@ import { fetchAnimeDetails } from "@/lib/api";
 import { useTopAnime, animeKeys } from "@/hooks/use-anime-queries";
 import type { JikanAnime } from "@/types/jikan";
 import AnimeDetailModal from "@/components/AnimeDetailModal";
-import { toast } from "@/hooks/use-toast";
 import NavBar from "@/components/NavBar";
 import Footer from "@/components/Footer";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import HeroBanner from "@/components/HeroBanner";
 import TopAnimeSection from "@/components/TopAnimeSection";
-import SeasonalAnimeSection from "@/components/SeasonalAnimeSection";
-import TopMangaSection from "@/components/TopMangaSection";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePageMeta } from "@/hooks/use-page-meta";
 
-// Below-the-fold sections are code-split so the landing tab loads first.
+// Below-the-fold sections are code-split so the landing content loads first.
 const HomeSections = lazy(() => import("@/components/HomeSections"));
 const ImageGallerySection = lazy(() => import("@/components/ImageGallerySection"));
 
@@ -36,7 +32,6 @@ const Index = () => {
   const [selectedAnime, setSelectedAnime] = useState<JikanAnime | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [featuredAnime, setFeaturedAnime] = useState<JikanAnime | null>(null);
-  const [activeTab, setActiveTab] = useState("top-anime");
 
   const pickRandomFeaturedAnime = useCallback((list: JikanAnime[]) => {
     if (list && list.length > 0) {
@@ -51,20 +46,6 @@ const Index = () => {
       pickRandomFeaturedAnime(animeList);
     }
   }, [animeList, featuredAnime, pickRandomFeaturedAnime]);
-
-  useEffect(() => {
-    const applyHash = () => {
-      const hash = window.location.hash.replace("#", "");
-      if (["top-anime", "seasonal", "top-manga"].includes(hash)) {
-        setActiveTab(hash);
-      }
-    };
-    applyHash();
-    // React to in-page hash navigation (e.g. clicking "Top Anime" in the
-    // navbar while already on the home page).
-    window.addEventListener("hashchange", applyHash);
-    return () => window.removeEventListener("hashchange", applyHash);
-  }, []);
 
   const handleCardClick = async (anime: JikanAnime) => {
     try {
@@ -105,33 +86,13 @@ const Index = () => {
 
         {/* Main Content */}
         <main className="flex-1 w-full pb-10">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <div className="flex justify-center border-b bg-white/30 backdrop-blur-sm sticky top-16 z-10">
-              <div className="max-w-7xl w-full px-3 sm:px-8">
-                <TabsList className="bg-transparent p-0 h-14">
-                  <TabsTrigger value="top-anime" className="text-base font-semibold text-zinc-600 data-[state=active]:text-purple-700 data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-purple-700 rounded-none h-full px-5">Top Anime</TabsTrigger>
-                  <TabsTrigger value="seasonal" className="text-base font-semibold text-zinc-600 data-[state=active]:text-purple-700 data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-purple-700 rounded-none h-full px-5">Seasonal</TabsTrigger>
-                  <TabsTrigger value="top-manga" className="text-base font-semibold text-zinc-600 data-[state=active]:text-purple-700 data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-purple-700 rounded-none h-full px-5">Manga</TabsTrigger>
-                </TabsList>
-              </div>
-            </div>
-            
-            <TabsContent value="top-anime" className="mt-0">
-              <TopAnimeSection
-                loading={isLoading}
-                animeList={animeList}
-                onCardClick={handleCardClick}
-              />
-            </TabsContent>
-            <TabsContent value="seasonal" className="mt-0">
-              <SeasonalAnimeSection onCardClick={handleCardClick} />
-            </TabsContent>
-            <TabsContent value="top-manga" className="mt-0">
-              <TopMangaSection />
-            </TabsContent>
-          </Tabs>
+          <TopAnimeSection
+            loading={isLoading}
+            animeList={animeList}
+            onCardClick={handleCardClick}
+          />
 
-          {/* Extra discovery rows (Trending, Airing Today, Movies, …) */}
+          {/* Extra discovery rows (Trending, Popular, Recently Updated) */}
           <LazySection><HomeSections onCardClick={handleCardClick} /></LazySection>
 
           <LazySection><ImageGallerySection /></LazySection>
@@ -142,7 +103,6 @@ const Index = () => {
           onOpenChange={setModalOpen}
           anime={selectedAnime}
         />
-        {/* You can add other sections like Seasonal/Random here */}
         <Footer />
       </div>
       {/* Mobile Sidebar Trigger */}
