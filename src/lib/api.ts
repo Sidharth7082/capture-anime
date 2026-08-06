@@ -425,3 +425,8 @@ export async function fetchWatchStreams(
     audio: opts.audio,
   });
 }
+
+/** GET /api/watch/:animeId/prefetch — warm the stream cache for early episodes. */
+export async function fetchWatchPrefetch(animeId: number | string, count = 3): Promise<{ provider: string; prefetched: number; total: number }> {
+  return apiFetch(`/api/watch/${animeId}/prefetch`, { count });
+}

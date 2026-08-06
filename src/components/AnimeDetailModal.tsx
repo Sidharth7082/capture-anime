@@ -4,7 +4,7 @@ import { X, ArrowLeft, ExternalLink } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
-import { statusLabel, fetchWatchStreams, type WatchStream, type WatchResponse } from "@/lib/api";
+import { statusLabel, fetchWatchStreams, fetchWatchPrefetch, type WatchStream, type WatchResponse } from "@/lib/api";
 import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -51,6 +51,8 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const episodeLoadSeqRef = useRef(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  // Timestamp of the latest play request, used for the player-start timing log.
+  const playStartRef = useRef(0);
 
   const animeId = open ? anime?.mal_id : null;
   // Full record + episode list come from the backend via the React Query cache.
@@ -70,6 +72,12 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
       setEpisodeJump('');
       episodeLoadSeqRef.current++; // invalidate any in-flight episode loads
       return;
+    }
+    // Prefetch stream URLs when the modal opens so the first play is instant.
+    if (anime.mal_id) {
+      fetchWatchPrefetch(anime.mal_id, 3)
+        .then((r) => console.info(`[watch] prefetch queued ${r.prefetched} episodes for ${anime.mal_id}`))
+        .catch(() => { /* backend may not have streaming configured — non-fatal */ });
     }
   }, [open, anime]);
 
@@ -106,6 +114,7 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     }
 
     const seq = ++episodeLoadSeqRef.current;
+    playStartRef.current = performance.now();
     setLoading(true);
     setPlayerStatus('Loading streams...');
     setCurrentSource(null);
@@ -134,6 +143,10 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
       if (best) {
         playSource(best);
       }
+      console.info(
+        `[watch] stream resolve ${(performance.now() - playStartRef.current).toFixed(0)}ms ` +
+        `(provider=${result.provider}, streams=${result.streams.length})`
+      );
     } catch (error) {
       if (seq !== episodeLoadSeqRef.current) return;
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -177,11 +190,19 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     const isHls = source.type === 'hls' || source.type === 'hls-redirect';
     if (!isHls) return;
 
+    const logPlayerStart = () => {
+      if (playStartRef.current) {
+        console.info(`[watch] player start ${(performance.now() - playStartRef.current).toFixed(0)}ms (hls)`);
+        playStartRef.current = 0;
+      }
+    };
+
     if (Hls.isSupported()) {
       const hls = new Hls();
       hls.loadSource(source.url);
       hls.attachMedia(video);
       hlsRef.current = hls;
+      hls.on(Hls.Events.MANIFEST_PARSED, logPlayerStart);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
         if (data.fatal) {
           setPlayerStatus('Playback error — trying another source may help.');
@@ -190,6 +211,7 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       // Safari native HLS
       video.src = source.url;
+      video.addEventListener('playing', logPlayerStart, { once: true });
     } else {
       setPlayerStatus('This browser cannot play HLS streams.');
     }
