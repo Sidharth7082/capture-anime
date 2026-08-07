@@ -43,8 +43,28 @@ interface PageResponse<T> {
   meta: { page: number; limit: number; total: number; totalPages: number; hasNextPage: boolean };
 }
 
-/** Start MAL OAuth — just navigate here (JWT not needed; it's a redirect). */
-export const malLoginUrl = `${API_BASE}/api/mal/connect`;
+/**
+ * Start MAL OAuth. This must NOT be a plain link: /api/mal/connect is
+ * JWT-protected, so we fetch it with the Bearer token, read the authorize
+ * URL from the JSON response, and only then navigate the browser there.
+ */
+export async function startMalConnect(): Promise<string> {
+  const headers = new Headers({ Accept: "application/json" });
+  const token = getAccessToken();
+  if (!token) {
+    throw new Error("Sign in to your CaptureOrDie account first, then connect MyAnimeList.");
+  }
+  headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(`${API_BASE}/api/mal/connect`, { method: "GET", headers });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = (body as { error?: { message?: string } } | null)?.error?.message;
+    throw new Error(message || `MAL connect failed (${res.status})`);
+  }
+  const authorizeUrl = (body as { authorizeUrl?: string } | null)?.authorizeUrl;
+  if (!authorizeUrl) throw new Error("MAL connect returned no authorize URL.");
+  return authorizeUrl;
+}
 
 async function malFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);

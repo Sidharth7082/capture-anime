@@ -3,6 +3,7 @@ import {
   fetchMalAnimeList,
   fetchMalMe,
   fetchMalSync,
+  startMalConnect,
   updateMalEntry,
   addMalEntry,
   removeMalEntry,
@@ -17,6 +18,21 @@ export const malKeys = {
   me: ["mal", "me"] as const,
   list: (status?: MalListStatus) => ["mal", "list", status ?? "all"] as const,
 };
+
+/**
+ * Connect MyAnimeList: fetch the authorize URL with the JWT (never a plain
+ * link — the endpoint is protected), then send the browser to MAL. Uses the
+ * returned URL so the PKCE state the backend persisted is the one used.
+ */
+export function useMalConnect() {
+  return useMutation({
+    mutationFn: async () => {
+      const authorizeUrl = await startMalConnect();
+      window.location.assign(authorizeUrl);
+      return authorizeUrl;
+    },
+  });
+}
 
 /** Linked MAL profile (connection state + username). */
 export function useMalMe() {

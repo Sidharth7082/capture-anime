@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useBackendAuth } from "@/hooks/use-backend-auth";
 import type { JikanAnime } from "@/types/jikan";
 import type { MalUser } from "@/lib/mal-client";
-import { malLoginUrl, fetchMalMe, fetchMalLogout } from "@/lib/mal-client";
+import { fetchMalMe, fetchMalLogout } from "@/lib/mal-client";
+import { useMalConnect } from "@/hooks/use-mal";
+import { toast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 import { Home, User, Bell, LogOut, Menu } from "lucide-react";
 import AnimeSearchBar from "@/components/AnimeSearchBar";
@@ -22,6 +24,7 @@ const NavBar = ({
   // Backend account (JWT) — syncs favorites / history / continue watching.
   const { user: backendUser, logout: backendLogout } = useBackendAuth();
   const handleBackendLogout = () => backendLogout.mutate();
+  const malConnect = useMalConnect();
 
   // Load the linked MAL profile (if any). Also refetch when returning from
   // the MAL OAuth redirect (the callback lands on /profile#mal=connected).
@@ -127,8 +130,22 @@ const NavBar = ({
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button asChild variant="outline" size="sm" className="h-10 rounded-full border-blue-300 text-blue-700 hover:bg-blue-50 font-semibold">
-              <a href={malLoginUrl}>Connect MyAnimeList</a>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-full border-blue-300 text-blue-700 hover:bg-blue-50 font-semibold"
+              onClick={() => {
+                malConnect.mutate(undefined, {
+                  onError: (err) => toast({
+                    title: "MAL Connect Failed",
+                    description: (err as Error).message,
+                    variant: "destructive",
+                  }),
+                });
+              }}
+              disabled={malConnect.isPending}
+            >
+              {malConnect.isPending ? "Connecting…" : "Connect MyAnimeList"}
             </Button>
           )}
           {/* Backend account (favorites / history / continue watching sync) */}

@@ -8,8 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useBackendAuth } from "@/hooks/use-backend-auth";
 import { useContinueWatchingList, useWatchHistoryList } from "@/hooks/use-continue-watching";
 import { useFavorites } from "@/hooks/use-favorites";
-import { useMalMe, useMalList, useMalSync } from "@/hooks/use-mal";
-import { malLoginUrl, fetchMalLogout } from "@/lib/mal-client"
+import { useMalMe, useMalList, useMalSync, useMalConnect } from "@/hooks/use-mal";
+import { fetchMalLogout } from "@/lib/mal-client"
 import type { JikanAnime } from "@/types/jikan";
 
 const ProfilePage = () => {
@@ -24,6 +24,7 @@ const ProfilePage = () => {
   const { data: malWatching = [] } = useMalList("watching", 100);
   const { data: malCompleted = [] } = useMalList("completed", 100);
   const malSync = useMalSync();
+  const malConnect = useMalConnect();
   const [malDisconnecting, setMalDisconnecting] = useState(false);
 
   // OAuth callback lands on /profile#mal=<status> — surface the outcome.
@@ -186,8 +187,14 @@ const ProfilePage = () => {
                         </Button>
                       </div>
                     ) : (
-                      <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
-                        <a href={malLoginUrl}>Connect MyAnimeList</a>
+                      <Button
+                        className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                        onClick={() => malConnect.mutate(undefined, {
+                          onError: (err) => toast.error("MAL Connect Failed", { description: (err as Error).message }),
+                        })}
+                        disabled={malConnect.isPending}
+                      >
+                        {malConnect.isPending ? "Connecting…" : "Connect MyAnimeList"}
                       </Button>
                     )}
                   </div>

@@ -12,15 +12,7 @@ import {
   useRecordHistory,
   useRemoveProgress,
 } from "@/hooks/use-continue-watching";
-import {
-  useMalMe,
-  useMalList,
-  useMalUpdateEntry,
-  useMalAddEntry,
-  useMalRemoveEntry,
-  useMalProgress,
-} from "@/hooks/use-mal";
-import { malLoginUrl } from "@/lib/mal-client";
+import { useMalMe, useMalList, useMalUpdateEntry, useMalAddEntry, useMalRemoveEntry, useMalProgress, useMalConnect } from "@/hooks/use-mal";
 import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -100,6 +92,7 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const malAdd = useMalAddEntry();
   const malRemove = useMalRemoveEntry();
   const malProgress = useMalProgress();
+  const malConnect = useMalConnect();
   const malEntry = malEntries.find((e) => e.animeId === d?.mal_id);
 
   const d = fullAnime ?? anime;
@@ -624,8 +617,19 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
                 ) : isAuthenticated ? (
                   <div className="rounded-xl border border-blue-900/40 bg-[#1a2436] p-4 flex items-center justify-between gap-3">
                     <p className="text-sm text-zinc-300">Connect MyAnimeList to sync your list here.</p>
-                    <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
-                      <a href={malLoginUrl}>Connect</a>
+                    <Button
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                      onClick={() => malConnect.mutate(undefined, {
+                        onError: (err) => toast({
+                          title: "MAL Connect Failed",
+                          description: (err as Error).message,
+                          variant: "destructive",
+                        }),
+                      })}
+                      disabled={malConnect.isPending}
+                    >
+                      {malConnect.isPending ? "Connecting…" : "Connect"}
                     </Button>
                   </div>
                 ) : null}
