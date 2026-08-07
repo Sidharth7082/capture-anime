@@ -8,8 +8,8 @@ type Mode = "signin" | "register";
 
 /**
  * Login / register against the anime backend (JWT). Syncs favorites, watch
- * history and continue-watching across devices. Kept separate from the
- * Supabase forms — it's an independent account system.
+ * history and continue-watching across devices. This is the app's single
+ * authentication system.
  */
 export function BackendAuthForm() {
   const navigate = useNavigate();

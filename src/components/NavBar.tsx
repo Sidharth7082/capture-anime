@@ -1,16 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from "@/integrations/supabase/client";
-import { Session } from "@supabase/supabase-js";
 import { useBackendAuth } from "@/hooks/use-backend-auth";
 import type { JikanAnime } from "@/types/jikan";
 import type { MalUser } from "@/lib/mal-client";
 import { malLoginUrl, fetchMalMe, fetchMalLogout } from "@/lib/mal-client";
-import { Link, useNavigate } from "react-router-dom";
-import { Home, User, History, Heart, Bell, FileText, Settings, LogOut, Instagram, Menu } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Home, User, Bell, LogOut, Menu } from "lucide-react";
 import AnimeSearchBar from "@/components/AnimeSearchBar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
 const NavBar = ({
@@ -18,11 +15,9 @@ const NavBar = ({
 }: {
   onSearch: (v: JikanAnime | null) => void;
 }) => {
-  const [session, setSession] = useState<Session | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [malUser, setMalUser] = useState<MalUser | null>(null);
   const [malLoading, setMalLoading] = useState(false);
-  const navigate = useNavigate();
 
   // Backend account (JWT) — syncs favorites / history / continue watching.
   const { user: backendUser, logout: backendLogout } = useBackendAuth();
@@ -60,31 +55,6 @@ const NavBar = ({
     } finally {
       setMalLoading(false);
     }
-  };
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({
-      data: {
-        session
-      }
-    }) => {
-      setSession(session);
-    }).catch((error) => {
-      console.error("Failed to restore session", error);
-    });
-    const {
-      data: {
-        subscription
-      }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate("/");
   };
 
   const handleSearchSelect = (v: JikanAnime | null) => {
@@ -180,52 +150,7 @@ const NavBar = ({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-          {session ? <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-                  <Avatar className="h-10 w-10">
-                    <AvatarImage src={session.user.user_metadata.avatar_url as string || undefined} alt={session.user.email ?? ''} />
-                    <AvatarFallback>{session.user.email?.[0].toUpperCase()}</AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-64 bg-[#211F2D] text-white border-none rounded-xl p-2 mt-2" align="end" forceMount>
-                <DropdownMenuLabel className="font-normal p-2">
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">
-                      {session.user.user_metadata.full_name as string || session.user.email?.split('@')[0]}
-                    </p>
-                    <p className="text-xs leading-none text-gray-400">
-                      {session.user.email}
-                    </p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator className="bg-[#3A374A]/50" />
-                <div className="p-1 space-y-1">
-                  <DropdownMenuItem asChild className="rounded-lg hover:!bg-[#3A374A] focus:!bg-[#3A374A] cursor-pointer p-2 text-sm">
-                    <Link to="/profile">
-                      <User className="mr-3 h-5 w-5" />
-                      <span>Profile</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  
-                  
-                  
-                  
-                  <DropdownMenuItem asChild className="rounded-lg hover:!bg-[#3A374A] focus:!bg-[#3A374A] cursor-pointer p-2 text-sm">
-                    <Link to="/settings">
-                      <Settings className="mr-3 h-5 w-5" />
-                      <span>Settings</span>
-                    </Link>
-                  </DropdownMenuItem>
-                </div>
-                <DropdownMenuSeparator className="bg-[#3A374A]/50" />
-                <DropdownMenuItem onClick={handleLogout} className="rounded-lg hover:!bg-[#3A374A] focus:!bg-[#3A374A] cursor-pointer p-2 text-sm">
-                  <LogOut className="mr-3 h-5 w-5" />
-                  <span>Logout</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu> : <div className="hidden md:block"><Button asChild className="bg-purple-600 hover:bg-purple-700 text-white">
+          {!backendUser && <div className="hidden md:block"><Button asChild className="bg-purple-600 hover:bg-purple-700 text-white">
               <Link to="/auth">Login</Link>
             </Button></div>}
             <div className="md:hidden">
@@ -261,7 +186,7 @@ const NavBar = ({
                           Sign out ({backendUser.username})
                         </Button>
                       )}
-                      {!session && (
+                      {!backendUser && (
                         <Button asChild className="w-full bg-purple-600 hover:bg-purple-700 text-white" onClick={() => setIsMobileMenuOpen(false)}>
                           <Link to="/auth">Login</Link>
                         </Button>
