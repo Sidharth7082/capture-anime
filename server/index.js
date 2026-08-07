@@ -21,12 +21,43 @@ function required(name, placeholderPrefix = 'your_') {
 const MAL_CLIENT_ID = required('MAL_CLIENT_ID');
 const MAL_CLIENT_SECRET = required('MAL_CLIENT_SECRET');
 const SESSION_SECRET = required('SESSION_SECRET');
-const MAL_REDIRECT_URI =
-  process.env.MAL_REDIRECT_URI || 'http://localhost:3000/api/auth/callback/mal';
+
+/**
+ * The OAuth redirect URI MUST be exactly ONE absolute URL — MAL redirects the
+ * browser there verbatim after authorization. A comma-joined value (e.g. a
+ * pasted pair of URLs) silently breaks the whole flow, so we refuse to boot
+ * instead of letting a malformed URI reach MAL.
+ */
+function resolveRedirectUri() {
+  const raw = (process.env.MAL_REDIRECT_URI || 'http://localhost:3000/api/auth/callback/mal').trim();
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    parsed = null;
+  }
+  const isSingleUrl =
+    parsed &&
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+    !/[\s,]/.test(raw) && // no whitespace or comma anywhere in the value
+    !raw.includes(',');
+  if (!isSingleUrl) {
+    throw new Error(
+      `Invalid MAL_REDIRECT_URI: "${raw}". It must be exactly ONE http(s) URL, ` +
+        'e.g. http://localhost:3000/api/auth/callback/mal (no commas, no extra URLs).',
+    );
+  }
+  return raw;
+}
+const MAL_REDIRECT_URI = resolveRedirectUri();
+
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:8080,http://localhost:3000')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+/** Where the frontend lives — used for the post-link redirect back to the app. */
+const FRONTEND_URL = (process.env.FRONTEND_URL || CORS_ORIGINS[0] || 'http://localhost:8080').trim();
 const PORT = Number(process.env.PORT || 3000);
 
 const MAL_AUTH_URL = 'https://myanimelist.net/v1/oauth2';
@@ -183,8 +214,7 @@ app.get('/api/auth/callback/mal', async (req, res) => {
     setSessionCookie(res, sessionToken);
 
     // Redirect back to the app with a hash the frontend can watch.
-    const frontend = CORS_ORIGINS[0] || 'http://localhost:8080';
-    res.redirect(`${frontend}/profile#mal=connected`);
+    res.redirect(`${FRONTEND_URL}/profile#mal=connected`);
   } catch (err) {
     console.error('MAL callback failed:', err);
     return sendError('Something went wrong while linking your MyAnimeList account.', 502);
