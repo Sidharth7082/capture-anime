@@ -23,5 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# env (local config; .env.example is the committed template — the root .env
+# pins VITE_API_URL to a LAN address and must never be committed)
+.env
+.env.*
+!.env.example
+
 # server env (contains MAL client secret)
 server/.env

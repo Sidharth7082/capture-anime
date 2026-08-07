@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { User, X, Settings, Star, Heart, History, Clock } from "lucide-react";
@@ -14,6 +15,7 @@ import type { JikanAnime } from "@/types/jikan";
 
 const ProfilePage = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, isAuthenticated, isLoading } = useBackendAuth();
   const favorites = useFavorites();
   const continueWatching = useContinueWatchingList(5);
@@ -46,6 +48,9 @@ const ProfilePage = () => {
     setMalDisconnecting(true);
     try {
       await fetchMalLogout();
+      // Clear the cached MAL profile/list so the UI stops showing the old
+      // linked account and rows until the next sign-in.
+      queryClient.invalidateQueries({ queryKey: ["mal"] });
       toast.success("MyAnimeList disconnected.");
     } catch {
       toast.error("Failed to disconnect MAL. Is the backend running?");

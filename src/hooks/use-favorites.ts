@@ -80,17 +80,21 @@ function useBackendFavorites(enabled: boolean) {
   });
 
   const toggle = useMutation({
-    mutationFn: (id: number): Promise<{ removed: boolean; id: number }> =>
-      queryClient.getQueryData<number[]>(authKeys.favorites)?.includes(id)
+    // React Query runs onMutate BEFORE mutationFn, so the decision to add vs
+    // remove must be captured from the pre-mutation state (wasFavorite) —
+    // reading the cache inside mutationFn would see the already-toggled
+    // array and invert every action (add → DELETE → 404, remove → re-create).
+    mutationFn: ({ id, wasFavorite }: { id: number; wasFavorite: boolean }): Promise<{ removed: boolean; id: number }> =>
+      wasFavorite
         ? removeFavorite(id).then(() => ({ removed: true, id }))
         : addFavorite(id).then((f) => ({ removed: false, id: f.animeId ?? id })),
-    onMutate: async (id: number) => {
+    onMutate: async ({ id, wasFavorite }: { id: number; wasFavorite: boolean }) => {
       await queryClient.cancelQueries({ queryKey: authKeys.favorites });
       const previous = queryClient.getQueryData<number[]>(authKeys.favorites);
       const current = previous ?? query.data ?? [];
       queryClient.setQueryData(
         authKeys.favorites,
-        current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+        wasFavorite ? current.filter((x) => x !== id) : [...current, id],
       );
       return { previous };
     },
@@ -104,7 +108,7 @@ function useBackendFavorites(enabled: boolean) {
 
   return {
     ids: query.data ?? [],
-    toggle: (id: number) => toggle.mutate(id),
+    toggle: (id: number) => toggle.mutate({ id, wasFavorite: query.data?.includes(id) ?? false }),
     isFavorite: (id: number) => query.data?.includes(id) ?? false,
   };
 }

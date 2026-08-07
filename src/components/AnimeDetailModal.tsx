@@ -93,9 +93,12 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const malRemove = useMalRemoveEntry();
   const malProgress = useMalProgress();
   const malConnect = useMalConnect();
-  const malEntry = malEntries.find((e) => e.animeId === d?.mal_id);
 
   const d = fullAnime ?? anime;
+  // `d` must be declared before it is referenced — reading it inside the
+  // `.find` callback below would otherwise throw a temporal-dead-zone
+  // ReferenceError whenever malEntries is non-empty.
+  const malEntry = malEntries.find((e) => e.animeId === d?.mal_id);
 
   // Reset state when modal opens/closes or anime changes
   useEffect(() => {

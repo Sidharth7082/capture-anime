@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchMalAnimeList,
   fetchMalMe,
@@ -53,7 +53,10 @@ export function useMalList(status?: MalListStatus, limit = 100) {
   const { isAuthenticated } = useBackendAuth();
   const connected = useMalMe().data != null;
   return useQuery({
-    queryKey: malKeys.list(status),
+    // limit is part of the key: HomeSections asks for 20 while ProfilePage
+    // asks for 100 — sharing one entry per status would silently serve the
+    // wrong-sized list to whichever component mounted second.
+    queryKey: [...malKeys.list(status), limit],
     queryFn: () => fetchMalAnimeList(status, { limit }),
     enabled: isAuthenticated && connected,
     staleTime: 60_000,
@@ -80,20 +83,18 @@ export function useMalUpdateEntry() {
       updateMalEntry(malAnimeId, patch),
     onMutate: async ({ malAnimeId, patch }) => {
       await queryClient.cancelQueries({ queryKey: ["mal", "list"] });
-      const previous: { key: QueryKey; data: MalListEntry[] }[] = [];
-      for (const status of ["watching", "completed", "on_hold", "dropped", "plan_to_watch", "all"] as const) {
-        const key = malKeys.list(status === "all" ? undefined : status);
-        const data = queryClient.getQueryData<MalListEntry[]>(key);
-        if (!data) continue;
-        previous.push({ key, data });
-        queryClient.setQueryData(key, data.map((e) =>
-          e.malAnimeId === malAnimeId ? { ...e, ...patch } : e,
-        ));
-      }
+      // List queries are keyed with their limit (["mal","list",status,limit]),
+      // so match every list variant by prefix instead of a limit-less key.
+      const previous = queryClient.getQueriesData<MalListEntry[]>({ queryKey: ["mal", "list"] });
+      queryClient.setQueriesData<MalListEntry[]>({ queryKey: ["mal", "list"] }, (old) =>
+        Array.isArray(old)
+          ? old.map((e) => (e.malAnimeId === malAnimeId ? { ...e, ...patch } : e))
+          : old,
+      );
       return { previous };
     },
     onError: (_err, _vars, ctx) => {
-      ctx?.previous.forEach(({ key, data }) => queryClient.setQueryData<MalListEntry[]>(key, data));
+      ctx?.previous.forEach(([key, data]) => queryClient.setQueryData<MalListEntry[]>(key, data));
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["mal", "list"] });
@@ -107,7 +108,9 @@ export function useMalAddEntry() {
   return useMutation({
     mutationFn: (body: Parameters<typeof addMalEntry>[0]) => addMalEntry(body),
     onSuccess: (result) => {
-      queryClient.setQueryData<MalListEntry[]>(malKeys.list(result.entry.status), (old = []) => [result.entry, ...old]);
+      queryClient.setQueriesData<MalListEntry[]>({ queryKey: ["mal", "list"] }, (old) =>
+        Array.isArray(old) ? [result.entry, ...old] : old,
+      );
       queryClient.invalidateQueries({ queryKey: ["mal", "list"] });
     },
   });
@@ -120,10 +123,9 @@ export function useMalRemoveEntry() {
     mutationFn: (malAnimeId: number) => removeMalEntry(malAnimeId),
     onMutate: async (malAnimeId) => {
       await queryClient.cancelQueries({ queryKey: ["mal", "list"] });
-      for (const key of [malKeys.list(), malKeys.list("watching"), malKeys.list("completed"), malKeys.list("plan_to_watch"), malKeys.list("on_hold"), malKeys.list("dropped")]) {
-        const data = queryClient.getQueryData<MalListEntry[]>(key);
-        if (data) queryClient.setQueryData(key, data.filter((e) => e.malAnimeId !== malAnimeId));
-      }
+      queryClient.setQueriesData<MalListEntry[]>({ queryKey: ["mal", "list"] }, (old) =>
+        Array.isArray(old) ? old.filter((e) => e.malAnimeId !== malAnimeId) : old,
+      );
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["mal", "list"] });

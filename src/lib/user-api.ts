@@ -246,7 +246,14 @@ export async function backendRegister(
 
 export async function backendLogout(): Promise<void> {
   try {
-    await authFetch("/api/auth/logout", { method: "POST" });
+    // Send the refresh token in the body: the backend resolves it from
+    // body ?? cookie, and in the cross-origin deployment the httpOnly cookie
+    // never reaches it. Without this the server-side token stays valid for
+    // up to 30 days after logout.
+    await authFetch("/api/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken: getRefreshToken() }),
+    });
   } catch {
     // best-effort — tokens are cleared regardless
   } finally {

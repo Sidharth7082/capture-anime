@@ -55,7 +55,10 @@ export async function startMalConnect(): Promise<string> {
     throw new Error("Sign in to your CaptureOrDie account first, then connect MyAnimeList.");
   }
   headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${API_BASE}/api/mal/connect`, { method: "GET", headers });
+  // credentials: include so the signed mal_state cookie set by /connect is
+  // stored and later sent on the MAL callback navigation (binds the OAuth
+  // state to this browser — prevents account-linking CSRF).
+  const res = await fetch(`${API_BASE}/api/mal/connect`, { method: "GET", headers, credentials: "include" });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const message = (body as { error?: { message?: string } } | null)?.error?.message;
@@ -77,10 +80,12 @@ async function malFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const message = (body as { error?: { message?: string } } | null)?.error?.message;
+    const err = new Error(message || `MAL request failed (${res.status})`) as Error & { status?: number };
+    err.status = res.status;
     if (res.status === 401) {
-      throw new Error(message || "Not signed in — sign in to use MyAnimeList sync.");
+      err.message = message || "Not signed in — sign in to use MyAnimeList sync.";
     }
-    throw new Error(message || `MAL request failed (${res.status})`);
+    throw err;
   }
   return body as T;
 }
@@ -90,8 +95,13 @@ export async function fetchMalMe(): Promise<{ user: MalUser | null }> {
   try {
     const res = await malFetch<{ connected: boolean; user: MalUser | null }>("/api/mal/me");
     return { user: res.connected ? res.user : null };
-  } catch {
-    return { user: null };
+  } catch (err) {
+    // Only a missing/dead session (401/403) means "not connected"; other
+    // failures (backend down, 5xx) must surface as errors instead of being
+    // silently rendered as disconnected.
+    const status = (err as { status?: number }).status;
+    if (status === 401 || status === 403) return { user: null };
+    throw err;
   }
 }
 

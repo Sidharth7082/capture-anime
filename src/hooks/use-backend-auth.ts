@@ -34,11 +34,16 @@ export function useBackendAuth() {
     retry: 1,
   });
 
-  // If the profile fetch failed with a dead session (401 after refresh),
-  // drop the stale tokens so the UI can show the signed-out state.
+  // If the profile fetch failed with a dead session (401/403 after the
+  // single-flight refresh), drop the stale tokens so the UI can show the
+  // signed-out state. Transient failures (5xx, network down) must NOT log
+  // the user out — a single blip during page load shouldn't wipe the session.
   useEffect(() => {
     if (userQuery.isError) {
-      clearTokens();
+      const status = (userQuery.error as { status?: number } | null)?.status;
+      if (status === 401 || status === 403) {
+        clearTokens();
+      }
     }
   }, [userQuery.isError]);
 
