@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, Suspense, lazy } from "react";
+import React, { useEffect, useState, useCallback, useMemo, Suspense, lazy } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { fetchAnimeDetails } from "@/lib/api";
 import { useTopAnime, animeKeys } from "@/hooks/use-anime-queries";
@@ -22,7 +22,7 @@ const LazySection = ({ children }: { children: React.ReactNode }) => (
 const Index = () => {
   const queryClient = useQueryClient();
   const { data: topAnimeData, isLoading } = useTopAnime();
-  const animeList: JikanAnime[] = topAnimeData?.data ?? [];
+  const animeList: JikanAnime[] = useMemo(() => topAnimeData?.data ?? [], [topAnimeData]);
 
   usePageMeta(
     "Top Anime, GIFs & Images",

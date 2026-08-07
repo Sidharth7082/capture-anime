@@ -1,10 +1,17 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X, ArrowLeft, ExternalLink } from "lucide-react";
+import { X, ArrowLeft, ExternalLink, SkipForward, SkipBack, Maximize, Volume2 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
 import { statusLabel, fetchWatchStreams, fetchWatchPrefetch, type WatchStream, type WatchResponse } from "@/lib/api";
+import { useBackendAuth } from "@/hooks/use-backend-auth";
+import {
+  useResumePoint,
+  useSaveProgress,
+  useRecordHistory,
+  useRemoveProgress,
+} from "@/hooks/use-continue-watching";
 import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -53,11 +60,29 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const hlsRef = useRef<Hls | null>(null);
   // Timestamp of the latest play request, used for the player-start timing log.
   const playStartRef = useRef(0);
+  // Playback progress is pushed to the backend at most once every 10s.
+  const lastSavedAtRef = useRef(0);
+  const lastSavedPosRef = useRef(-1);
+  // Episodes whose "watched" history row was already recorded this session.
+  const historyRecordedRef = useRef<Set<string>>(new Set());
+  // Episodes whose saved resume position was already applied this session.
+  const resumeAppliedRef = useRef<Set<string>>(new Set());
+  // Current playhead/duration (mirrored for the skip-intro/outro buttons).
+  const [playerTime, setPlayerTime] = useState(0);
+  const [playerDuration, setPlayerDuration] = useState(0);
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
 
   const animeId = open ? anime?.mal_id : null;
   // Full record + episode list come from the backend via the React Query cache.
   const { data: fullAnime, isLoading: detailLoading } = useAnimeDetails(animeId);
   const { data: episodeList = [], isLoading: episodesLoading } = useEpisodes(animeId);
+
+  // --- backend session + user data ---------------------------------------
+  const { isAuthenticated } = useBackendAuth();
+  const resumeQuery = useResumePoint(animeId);
+  const saveProgress = useSaveProgress();
+  const recordHistoryMut = useRecordHistory();
+  const removeProgress = useRemoveProgress();
 
   const d = fullAnime ?? anime;
 
@@ -70,6 +95,8 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
       setCurrentSource(null);
       setPlayerStatus('');
       setEpisodeJump('');
+      setPlayerTime(0);
+      setPlayerDuration(0);
       episodeLoadSeqRef.current++; // invalidate any in-flight episode loads
       return;
     }
@@ -90,6 +117,91 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
       }
     };
   }, []);
+
+  // Resume from the saved position once per episode, per session.
+  useEffect(() => {
+    const video = videoRef.current;
+    const resume = resumeQuery.data;
+    if (!video || !currentSource || !isAuthenticated || !d?.mal_id || !resume) return;
+    if (resume.episodeNumber !== episode) return;
+    const key = `${d.mal_id}:${episode}`;
+    if (resumeAppliedRef.current.has(key)) return;
+    if (resume.playbackPositionSeconds < 5) return; // effectively at the start
+    const apply = () => {
+      if (resumeAppliedRef.current.has(key)) return;
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      // Don't seek into the final seconds — that would skip the ending.
+      if (duration > 0 && resume.playbackPositionSeconds < duration - 10) {
+        video.currentTime = resume.playbackPositionSeconds;
+        setPlayerTime(resume.playbackPositionSeconds);
+      }
+      resumeAppliedRef.current.add(key);
+    };
+    video.addEventListener("loadedmetadata", apply, { once: true });
+    return () => video.removeEventListener("loadedmetadata", apply);
+  }, [currentSource, resumeQuery.data, isAuthenticated, d?.mal_id, episode]);
+
+  // Push playback progress to the backend at most once every 10 seconds.
+  useEffect(() => {
+    if (!currentSource || currentView !== "player" || !isAuthenticated || !d?.mal_id) return;
+    const id = window.setInterval(() => {
+      const video = videoRef.current;
+      if (!video || video.paused || video.ended) return;
+      const pos = Math.floor(video.currentTime);
+      if (pos <= 0 || pos === lastSavedPosRef.current) return;
+      if (Date.now() - lastSavedAtRef.current < 10_000) return;
+      lastSavedAtRef.current = Date.now();
+      lastSavedPosRef.current = pos;
+      saveProgress.mutate({
+        animeId: d.mal_id as number,
+        input: {
+          episodeNumber: episode,
+          playbackPositionSeconds: pos,
+          durationSeconds: Number.isFinite(video.duration) ? Math.floor(video.duration) : undefined,
+        },
+      });
+    }, 2_000);
+    return () => window.clearInterval(id);
+  }, [currentSource, currentView, isAuthenticated, d?.mal_id, episode, saveProgress]);
+
+  // Keyboard shortcuts while the player is open:
+  // Space = play/pause, ←/→ = seek ±10s, F = fullscreen, M = mute.
+  useEffect(() => {
+    if (currentView !== "player") return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      const video = videoRef.current;
+      if (!video) return;
+      switch (e.key.toLowerCase()) {
+        case " ":
+          e.preventDefault();
+          if (video.paused) void video.play(); else video.pause();
+          break;
+        case "arrowleft":
+          e.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - 10);
+          setPlayerTime(video.currentTime);
+          break;
+        case "arrowright":
+          e.preventDefault();
+          video.currentTime = Math.min(video.duration || Number.MAX_SAFE_INTEGER, video.currentTime + 10);
+          setPlayerTime(video.currentTime);
+          break;
+        case "f":
+          e.preventDefault();
+          if (document.fullscreenElement) void document.exitFullscreen();
+          else void playerContainerRef.current?.requestFullscreen();
+          break;
+        case "m":
+          e.preventDefault();
+          video.muted = !video.muted;
+          break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [currentView]);
 
   const episodeCount = Math.max(episodeList.length, d?.episodes ?? 0, 1);
 
@@ -179,6 +291,12 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
         poster: d.images?.webp?.large_image_url || d.images?.jpg?.large_image_url,
         episode,
       });
+      // Backend: record this episode in watch history once per episode.
+      const key = `${d.mal_id}:${episode}`;
+      if (isAuthenticated && !historyRecordedRef.current.has(key)) {
+        historyRecordedRef.current.add(key);
+        recordHistoryMut.mutate({ animeId: d.mal_id, episode });
+      }
     }
   };
 
@@ -222,6 +340,20 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     if (!source) return null;
 
     const isHls = source.type === 'hls' || source.type === 'hls-redirect';
+    const handleEnded = () => {
+      if (!d?.mal_id) return;
+      const next = episodeList.find((e) => e.number === episode + 1);
+      if (next) {
+        setPlayerStatus(`Auto-playing episode ${next.number}…`);
+        loadAndPlayEpisode(next.number);
+      } else {
+        // Series finished — drop the resume point so Continue Watching
+        // doesn't offer a completed show.
+        if (isAuthenticated) removeProgress.mutate(d.mal_id);
+        setPlayerStatus('You reached the end of this series. 🎉');
+      }
+    };
+
     if (isHls || source.type === 'mp4' || source.type === 'direct') {
       return (
         <video
@@ -231,6 +363,17 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
           autoPlay
           className="w-full h-full"
           src={isHls ? undefined : source.url}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget;
+            setPlayerTime(v.currentTime);
+            if (Number.isFinite(v.duration)) setPlayerDuration(v.duration);
+          }}
+          onLoadedMetadata={(e) => {
+            if (Number.isFinite(e.currentTarget.duration)) {
+              setPlayerDuration(e.currentTarget.duration);
+            }
+          }}
+          onEnded={handleEnded}
           onError={() => {
             setPlayerStatus('Error playing video. Try another source.');
             toast({
@@ -456,7 +599,10 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
               </div>
 
               {/* Video Player */}
-              <div className="relative aspect-video w-full rounded-xl overflow-hidden border-2 border-[#202023] shadow-lg bg-black">
+              <div
+                ref={playerContainerRef}
+                className="group relative aspect-video w-full rounded-xl overflow-hidden border-2 border-[#202023] shadow-lg bg-black"
+              >
                 {loading && !currentSource ? (
                   <div className="absolute inset-0 flex items-center justify-center text-white/80">
                     <span className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mr-3" />
@@ -470,6 +616,45 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
                     {playerStatus}
                   </div>
                 )}
+
+                {/* Skip Intro / Skip Outro — heuristic 85s markers (the
+                    streaming API doesn't expose exact timestamps yet). */}
+                {currentSource &&
+                  (currentSource.type === 'hls' || currentSource.type === 'hls-redirect' ||
+                   currentSource.type === 'mp4' || currentSource.type === 'direct') && (
+                  <>
+                    {playerTime > 0 && playerTime < 95 && (
+                      <button
+                        onClick={() => {
+                          const v = videoRef.current;
+                          if (v) v.currentTime = Math.min(85, Math.max(0, v.duration || 0));
+                        }}
+                        className="absolute top-4 right-4 flex items-center gap-1 rounded-lg bg-white/15 backdrop-blur px-3 py-1.5 text-sm font-semibold text-white shadow-lg transition hover:bg-white/25"
+                      >
+                        <SkipForward className="h-4 w-4" /> Skip Intro
+                      </button>
+                    )}
+                    {playerDuration > 0 && playerTime > playerDuration - 95 && playerTime < playerDuration - 5 && (
+                      <button
+                        onClick={() => {
+                          const v = videoRef.current;
+                          if (v) v.currentTime = Math.max(0, playerDuration - 85);
+                        }}
+                        className="absolute top-4 right-4 flex items-center gap-1 rounded-lg bg-white/15 backdrop-blur px-3 py-1.5 text-sm font-semibold text-white shadow-lg transition hover:bg-white/25"
+                      >
+                        <SkipBack className="h-4 w-4" /> Skip Outro
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* Shortcut hints (visible on hover) */}
+                <div className="absolute bottom-4 right-4 hidden md:flex items-center gap-2 text-[11px] text-white/60 bg-black/50 rounded px-2 py-1 opacity-0 group-hover:opacity-100 transition">
+                  <span><kbd className="px-1 bg-white/15 rounded">Space</kbd> Play</span>
+                  <span><kbd className="px-1 bg-white/15 rounded">←→</kbd> Seek</span>
+                  <span><kbd className="px-1 bg-white/15 rounded">F</kbd> Fullscreen</span>
+                  <span><kbd className="px-1 bg-white/15 rounded">M</kbd> Mute</span>
+                </div>
               </div>
 
               {/* Source Selection */}

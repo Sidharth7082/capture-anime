@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { addFavorite, listFavorites, removeFavorite } from "@/lib/user-api";
+import { authKeys, useBackendAuth } from "@/hooks/use-backend-auth";
 
-// Module-level favorite store (localStorage-backed). A module store is used
-// instead of per-component state so every card shares the same list and
-// toggling a heart anywhere updates all cards immediately. Phase 4 (user
-// system) can swap the persistence layer for a per-user backend without
-// changing the hook's API.
+// ---------------------------------------------------------------------------
+// Guest store — module-level, localStorage-backed, shared by every card so a
+// heart toggle updates all cards immediately. When the user signs into the
+// backend, the guest list is merged into the server list and this store is
+// bypassed (see below).
+// ---------------------------------------------------------------------------
 const KEY = "favorite-anime-ids";
 
 function read(): number[] {
@@ -17,7 +21,7 @@ function read(): number[] {
   }
 }
 
-let favorites: number[] = read();
+let guestIds: number[] = read();
 const listeners = new Set<() => void>();
 
 function notify() {
@@ -26,15 +30,14 @@ function notify() {
 
 function persist() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(favorites));
+    localStorage.setItem(KEY, JSON.stringify(guestIds));
   } catch {
     // Storage unavailable (private mode, quota) — favorites just won't persist.
   }
 }
 
-export function useFavorites() {
+function useGuestFavorites() {
   const [, forceRender] = useState(0);
-
   useEffect(() => {
     const listener = () => forceRender((n) => n + 1);
     listeners.add(listener);
@@ -43,17 +46,81 @@ export function useFavorites() {
     };
   }, []);
 
-  const toggle = (id: number) => {
-    favorites = favorites.includes(id)
-      ? favorites.filter((x) => x !== id)
-      : [...favorites, id];
+  const toggleGuest = (id: number) => {
+    guestIds = guestIds.includes(id)
+      ? guestIds.filter((x) => x !== id)
+      : [...guestIds, id];
     persist();
     notify();
   };
 
   return {
-    ids: favorites,
-    toggle,
-    isFavorite: (id: number) => favorites.includes(id),
+    ids: guestIds,
+    toggle: toggleGuest,
+    isFavorite: (id: number) => guestIds.includes(id),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Backend favorites — React Query, optimistic toggle. Only active when the
+// user is signed in; otherwise the guest store handles everything.
+// ---------------------------------------------------------------------------
+function useBackendFavorites(enabled: boolean) {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: authKeys.favorites,
+    queryFn: () => listFavorites({ limit: 100 }),
+    enabled,
+    staleTime: 60_000,
+    select: (page) =>
+      page.data
+        .filter((f) => f.type === "anime" && f.animeId != null)
+        .map((f) => f.animeId as number),
+  });
+
+  const toggle = useMutation({
+    mutationFn: (id: number): Promise<{ removed: boolean; id: number }> =>
+      queryClient.getQueryData<number[]>(authKeys.favorites)?.includes(id)
+        ? removeFavorite(id).then(() => ({ removed: true, id }))
+        : addFavorite(id).then((f) => ({ removed: false, id: f.animeId ?? id })),
+    onMutate: async (id: number) => {
+      await queryClient.cancelQueries({ queryKey: authKeys.favorites });
+      const previous = queryClient.getQueryData<number[]>(authKeys.favorites);
+      const current = previous ?? query.data ?? [];
+      queryClient.setQueryData(
+        authKeys.favorites,
+        current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+      );
+      return { previous };
+    },
+    onError: (_err, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(authKeys.favorites, context.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: authKeys.favorites });
+    },
+  });
+
+  return {
+    ids: query.data ?? [],
+    toggle: (id: number) => toggle.mutate(id),
+    isFavorite: (id: number) => query.data?.includes(id) ?? false,
+  };
+}
+
+/**
+ * Shared favorites API used by every card: `{ ids, toggle, isFavorite }`.
+ * Signed-in users get server-synced favorites (optimistic); guests get the
+ * localStorage store. The toggle never blocks on the network — the UI
+ * updates instantly either way.
+ */
+export function useFavorites() {
+  const { isAuthenticated } = useBackendAuth();
+  const guest = useGuestFavorites();
+  const backend = useBackendFavorites(isAuthenticated);
+
+  // Keep the hooks' rules-of-hooks happy regardless of auth state; the
+  // backend query is disabled (no token) while signed out.
+  return isAuthenticated ? backend : guest;
 }

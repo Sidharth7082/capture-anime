@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from "@/integrations/supabase/client";
 import { Session } from "@supabase/supabase-js";
+import { useBackendAuth } from "@/hooks/use-backend-auth";
 import type { JikanAnime } from "@/types/jikan";
 import type { MalUser } from "@/lib/mal-client";
 import { malLoginUrl, fetchMalMe, fetchMalLogout } from "@/lib/mal-client";
@@ -22,6 +23,10 @@ const NavBar = ({
   const [malUser, setMalUser] = useState<MalUser | null>(null);
   const [malLoading, setMalLoading] = useState(false);
   const navigate = useNavigate();
+
+  // Backend account (JWT) — syncs favorites / history / continue watching.
+  const { user: backendUser, logout: backendLogout } = useBackendAuth();
+  const handleBackendLogout = () => backendLogout.mutate();
 
   // Load the linked MAL profile (if any). Also refetch when returning from
   // the MAL OAuth redirect (the callback lands on /profile#mal=connected).
@@ -156,6 +161,25 @@ const NavBar = ({
               <a href={malLoginUrl}>Connect MyAnimeList</a>
             </Button>
           )}
+          {/* Backend account (favorites / history / continue watching sync) */}
+          {backendUser && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-10 rounded-full border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 font-semibold">
+                  <User className="h-4 w-4 mr-2" />
+                  {backendUser.username}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-60 bg-white border-zinc-200 rounded-xl p-2 mt-2 shadow-xl" align="end" forceMount>
+                <DropdownMenuLabel className="font-semibold text-sm text-zinc-800">Anime account</DropdownMenuLabel>
+                <DropdownMenuSeparator className="bg-zinc-100" />
+                <DropdownMenuItem onClick={handleBackendLogout} disabled={backendLogout.isPending} className="rounded-lg cursor-pointer">
+                  <LogOut className="mr-3 h-5 w-5 text-zinc-500" />
+                  <span>{backendLogout.isPending ? "Signing out…" : "Sign out"}</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           {session ? <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-10 w-10 rounded-full">
@@ -232,6 +256,11 @@ const NavBar = ({
                       <a href="/#image" onClick={() => setIsMobileMenuOpen(false)} className="text-lg font-medium p-3 rounded-lg hover:bg-zinc-100 transition-colors">Image</a>
                     </nav>
                     <div className="mt-auto p-4 border-t">
+                      {backendUser && (
+                        <Button variant="outline" className="w-full mb-2 border-purple-300 text-purple-700" onClick={() => { handleBackendLogout(); setIsMobileMenuOpen(false); }}>
+                          Sign out ({backendUser.username})
+                        </Button>
+                      )}
                       {!session && (
                         <Button asChild className="w-full bg-purple-600 hover:bg-purple-700 text-white" onClick={() => setIsMobileMenuOpen(false)}>
                           <Link to="/auth">Login</Link>

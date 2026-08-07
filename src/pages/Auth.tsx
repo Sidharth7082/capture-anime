@@ -9,6 +9,7 @@ import { SignInForm } from "@/components/auth/SignInForm";
 import { SignUpForm } from "@/components/auth/SignUpForm";
 import { ResetPasswordForm } from "@/components/auth/ResetPasswordForm";
 import { UpdatePasswordForm } from "@/components/auth/UpdatePasswordForm";
+import { BackendAuthForm } from "@/components/auth/BackendAuthForm";
 import { X } from "lucide-react";
 
 const AuthPage = () => {
@@ -100,7 +101,8 @@ const AuthPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#e0e0ff]/60 via-[#f8f4fa]/60 to-[#faf6fb]/90 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#e0e0ff]/60 via-[#f8f4fa]/60 to-[#faf6fb]/90 p-4 gap-4">
+      <BackendAuthForm />
       {showUpdatePassword ? <UpdatePasswordForm setShowUpdatePassword={setShowUpdatePassword} /> : (
         <Card className="w-full max-w-md shadow-2xl border-purple-100 relative">
           <Button
