@@ -25,23 +25,25 @@ const SESSION_SECRET = required('SESSION_SECRET');
 /**
  * The OAuth redirect URI MUST be exactly ONE absolute URL — MAL redirects the
  * browser there verbatim after authorization. A comma-joined value (e.g. a
- * pasted pair of URLs) silently breaks the whole flow, so we refuse to boot
- * instead of letting a malformed URI reach MAL.
+ * pasted pair of URLs) silently breaks the whole flow.
  */
-function resolveRedirectUri() {
-  const raw = (process.env.MAL_REDIRECT_URI || 'http://localhost:3000/api/auth/callback/mal').trim();
+function isSingleUrl(value) {
   let parsed;
   try {
-    parsed = new URL(raw);
+    parsed = new URL(value);
   } catch {
-    parsed = null;
+    return false;
   }
-  const isSingleUrl =
-    parsed &&
+  return (
     (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
-    !/[\s,]/.test(raw) && // no whitespace or comma anywhere in the value
-    !raw.includes(',');
-  if (!isSingleUrl) {
+    !/[\s,]/.test(value) && // no whitespace or comma anywhere in the value
+    !value.includes(',')
+  );
+}
+
+function resolveRedirectUri() {
+  const raw = (process.env.MAL_REDIRECT_URI || 'http://localhost:3000/api/auth/callback/mal').trim();
+  if (!isSingleUrl(raw)) {
     throw new Error(
       `Invalid MAL_REDIRECT_URI: "${raw}". It must be exactly ONE http(s) URL, ` +
         'e.g. http://localhost:3000/api/auth/callback/mal (no commas, no extra URLs).',
@@ -58,6 +60,12 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:8080,http://
 
 /** Where the frontend lives — used for the post-link redirect back to the app. */
 const FRONTEND_URL = (process.env.FRONTEND_URL || CORS_ORIGINS[0] || 'http://localhost:8080').trim();
+if (!isSingleUrl(FRONTEND_URL)) {
+  throw new Error(
+    `Invalid FRONTEND_URL: "${FRONTEND_URL}". It must be exactly ONE http(s) URL, ` +
+      'e.g. https://capture-anime.netlify.app.',
+  );
+}
 const PORT = Number(process.env.PORT || 3000);
 
 const MAL_AUTH_URL = 'https://myanimelist.net/v1/oauth2';
@@ -150,6 +158,12 @@ async function malGet(path, accessToken) {
 
 /** Start MAL OAuth: generate PKCE + state, store the verifier, redirect. */
 app.get('/api/auth/mal', (req, res) => {
+  // Defense in depth: even though the URI is validated at boot, re-assert
+  // right before it is sent to MAL so a malformed value can never reach the
+  // authorize URL (e.g. if this module is loaded with monkey-patched env).
+  if (!isSingleUrl(MAL_REDIRECT_URI)) {
+    return res.status(500).json({ error: 'Server misconfiguration: MAL_REDIRECT_URI is not a single URL.' });
+  }
   const state = crypto.randomUUID();
   const codeVerifier = crypto.randomBytes(48).toString('base64url');
   const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
