@@ -8,6 +8,7 @@ import {
   useContinueWatchingList,
   useWatchHistoryList,
 } from "@/hooks/use-continue-watching";
+import { useMalMe, useMalList, useMalSync } from "@/hooks/use-mal";
 import { listFavorites } from "@/lib/user-api";
 import { fetchTrendingAnime, fetchPopularAnime, fetchRecentAnime } from "@/lib/api";
 import type { JikanAnime } from "@/types/jikan";
@@ -191,6 +192,59 @@ const SignInPrompt: React.FC = () => {
 };
 
 /**
+ * One MyAnimeList row (Watching / Completed / Plan to Watch). Shown only
+ * when a MAL account is linked and the row has entries.
+ */
+const MalRowSection: React.FC<{
+  title: string;
+  status: "watching" | "completed" | "plan_to_watch";
+  onCardClick: (anime: JikanAnime) => void;
+}> = ({ title, status, onCardClick }) => {
+  const { data: malUser } = useMalMe();
+  const { data: entries, isLoading } = useMalList(status, 20);
+
+  if (!malUser || isLoading || (entries ?? []).length === 0) return null;
+
+  return (
+    <section className="w-full">
+      <h2 className="text-xl md:text-2xl font-extrabold text-zinc-900 tracking-tight mb-3 px-1">
+        MAL · {title}
+      </h2>
+      <div className="flex gap-4 overflow-x-auto pb-4">
+        {entries!.map((entry) => (
+          <UserRowCard
+            key={entry.malAnimeId}
+            anime={toPartialAnime(
+              entry.anime?.id ?? entry.malAnimeId,
+              entry.anime?.title ?? `MAL #${entry.malAnimeId}`,
+              entry.anime?.coverImageMedium,
+            )}
+            subtitle={`${entry.status.replace(/_/g, " ")}${entry.score > 0 ? ` · ★${entry.score}` : ""}`}
+            onCardClick={onCardClick}
+          />
+        ))}
+      </div>
+    </section>
+  );
+};
+
+/** Small "Sync now" affordance for the MyAnimeList rows. */
+const MalSyncButton: React.FC = () => {
+  const { data: malUser } = useMalMe();
+  const sync = useMalSync();
+  if (!malUser) return null;
+  return (
+    <button
+      onClick={() => sync.mutate()}
+      disabled={sync.isPending}
+      className="text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-50 px-1"
+    >
+      {sync.isPending ? "Syncing…" : "↻ Sync from MyAnimeList"}
+    </button>
+  );
+};
+
+/**
  * Homepage discovery rows backed by the production backend
  * (/api/anime/trending, /api/anime/popular, /api/anime/recent). Each row is
  * its own React Query query (cached), with skeletons while loading and a
@@ -205,6 +259,14 @@ const HomeSections: React.FC<HomeSectionsProps> = ({ onCardClick }) => {
       <ContinueWatchingRow onCardClick={onCardClick} />
       {isAuthenticated && <RecentlyWatchedRow onCardClick={onCardClick} />}
       {isAuthenticated && <FavoritesRow onCardClick={onCardClick} />}
+      {isAuthenticated && <MalSyncButton />}
+      {isAuthenticated && (
+        <>
+          <MalRowSection title="Watching" status="watching" onCardClick={onCardClick} />
+          <MalRowSection title="Completed" status="completed" onCardClick={onCardClick} />
+          <MalRowSection title="Plan to Watch" status="plan_to_watch" onCardClick={onCardClick} />
+        </>
+      )}
       <AnimeRowSection
         title="Trending Now"
         subtitle="Most popular right now"

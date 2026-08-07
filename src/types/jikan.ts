@@ -30,6 +30,8 @@ export interface JikanStudio {
 
 export interface JikanAnime {
   mal_id: number;
+  /** Local catalog id for MyAnimeList cross-referencing (anime.id_mal). */
+  malId?: number | null;
   url: string;
   images: JikanImages;
   trailer?: {

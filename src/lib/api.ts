@@ -160,6 +160,7 @@ export function normalizeAnime(raw: unknown): JikanAnime {
       : undefined;
   return {
     mal_id: id,
+    malId: toNum(item.idMal ?? item.id_mal) ?? null,
     url: String(item.url ?? item.mal_url ?? ""),
     images: pickImage(item),
     title,

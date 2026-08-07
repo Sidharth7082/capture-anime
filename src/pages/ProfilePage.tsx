@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -6,11 +6,10 @@ import { User, X, Settings, Star, Heart, History, Clock } from "lucide-react";
 import NavBar from "@/components/NavBar";
 import { Card, CardContent } from "@/components/ui/card";
 import { useBackendAuth } from "@/hooks/use-backend-auth";
-import { useContinueWatchingList } from "@/hooks/use-continue-watching";
-import { useWatchHistoryList } from "@/hooks/use-continue-watching";
+import { useContinueWatchingList, useWatchHistoryList } from "@/hooks/use-continue-watching";
 import { useFavorites } from "@/hooks/use-favorites";
-import { malLoginUrl, fetchMalMe, fetchMalLogout, fetchMalAnimeList, fetchMalFavorites } from "@/lib/mal-client"
-import type { MalUser } from "@/lib/mal-client"
+import { useMalMe, useMalList, useMalSync } from "@/hooks/use-mal";
+import { malLoginUrl, fetchMalLogout } from "@/lib/mal-client"
 import type { JikanAnime } from "@/types/jikan";
 
 const ProfilePage = () => {
@@ -20,46 +19,33 @@ const ProfilePage = () => {
   const continueWatching = useContinueWatchingList(5);
   const watchHistory = useWatchHistoryList(5);
 
-  // --- MyAnimeList connection state (server-side OAuth) ---
-  const [malUser, setMalUser] = useState<MalUser | null>(null);
-  const [malStats, setMalStats] = useState<{ watching: number; completed: number; total: number } | null>(null);
-  const [malFavCount, setMalFavCount] = useState<number | null>(null);
+  // --- MyAnimeList sync state (React Query) ---
+  const { data: malUser } = useMalMe();
+  const { data: malWatching = [] } = useMalList("watching", 100);
+  const { data: malCompleted = [] } = useMalList("completed", 100);
+  const malSync = useMalSync();
   const [malDisconnecting, setMalDisconnecting] = useState(false);
 
+  // OAuth callback lands on /profile#mal=<status> — surface the outcome.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { user } = await fetchMalMe();
-        if (cancelled) return;
-        setMalUser(user);
-        if (user) {
-          const [list, favs] = await Promise.all([fetchMalAnimeList(), fetchMalFavorites()]);
-          if (cancelled) return;
-          const statuses = list.data.map((e) => e.list_status.status);
-          setMalStats({
-            watching: statuses.filter((s) => s === "watching").length,
-            completed: statuses.filter((s) => s === "completed").length,
-            total: statuses.length,
-          });
-          setMalFavCount(favs.favorites?.anime?.length ?? 0);
-        }
-      } catch {
-        // Backend offline — the section simply stays in its disconnected state.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const hash = window.location.hash;
+    if (hash.includes("mal=connected")) {
+      toast.success("MyAnimeList connected!", { description: "Your list is syncing." });
+      window.history.replaceState(null, "", window.location.pathname);
+    } else if (hash.includes("mal=denied")) {
+      toast.error("MyAnimeList connection cancelled.");
+      window.history.replaceState(null, "", window.location.pathname);
+    } else if (hash.includes("mal=expired") || hash.includes("mal=error")) {
+      toast.error("MyAnimeList connection failed.", { description: "Please try connecting again." });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
 
   const handleMalDisconnect = async () => {
     setMalDisconnecting(true);
     try {
       await fetchMalLogout();
-      setMalUser(null);
-      setMalStats(null);
-      setMalFavCount(null);
+      toast.success("MyAnimeList disconnected.");
     } catch {
       toast.error("Failed to disconnect MAL. Is the backend running?");
     } finally {
@@ -167,8 +153,11 @@ const ProfilePage = () => {
                       {malUser ? (
                         <p className="text-gray-400 text-sm">
                           Linked as <span className="text-blue-400 font-semibold">{malUser.name}</span>
-                          {malStats && (
-                            <span className="text-gray-500"> · {malStats.watching} watching · {malStats.completed} completed · {malFavCount ?? 0} favorites</span>
+                          <span className="text-gray-500">
+                            {" "}· {malWatching.length} watching · {malCompleted.length} completed
+                          </span>
+                          {malSync.data && (
+                            <span className="text-gray-500"> · last sync: {malSync.data.synced} entries</span>
                           )}
                         </p>
                       ) : (
@@ -178,14 +167,24 @@ const ProfilePage = () => {
                       )}
                     </div>
                     {malUser ? (
-                      <Button
-                        variant="outline"
-                        className="border-gray-600 text-gray-300 hover:bg-gray-700/50 hover:text-white shrink-0"
-                        onClick={handleMalDisconnect}
-                        disabled={malDisconnecting}
-                      >
-                        {malDisconnecting ? "Disconnecting…" : "Disconnect"}
-                      </Button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          className="border-gray-600 text-gray-300 hover:bg-gray-700/50 hover:text-white"
+                          onClick={() => malSync.mutate()}
+                          disabled={malSync.isPending}
+                        >
+                          {malSync.isPending ? "Syncing…" : "Sync now"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="border-gray-600 text-gray-300 hover:bg-gray-700/50 hover:text-white"
+                          onClick={handleMalDisconnect}
+                          disabled={malDisconnecting}
+                        >
+                          {malDisconnecting ? "Disconnecting…" : "Disconnect"}
+                        </Button>
+                      </div>
                     ) : (
                       <Button asChild className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
                         <a href={malLoginUrl}>Connect MyAnimeList</a>

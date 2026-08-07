@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { X, ArrowLeft, ExternalLink, SkipForward, SkipBack, Maximize, Volume2 } from "lucide-react";
+import { X, ArrowLeft, ExternalLink, SkipForward, SkipBack, Star } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { useAnimeDetails, useEpisodes } from "@/hooks/use-anime-queries";
@@ -12,6 +12,15 @@ import {
   useRecordHistory,
   useRemoveProgress,
 } from "@/hooks/use-continue-watching";
+import {
+  useMalMe,
+  useMalList,
+  useMalUpdateEntry,
+  useMalAddEntry,
+  useMalRemoveEntry,
+  useMalProgress,
+} from "@/hooks/use-mal";
+import { malLoginUrl } from "@/lib/mal-client";
 import AniListSynopsis from "@/components/AniListSynopsis";
 import { toast } from "@/components/ui/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -83,6 +92,15 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
   const saveProgress = useSaveProgress();
   const recordHistoryMut = useRecordHistory();
   const removeProgress = useRemoveProgress();
+
+  // --- MyAnimeList sync ---------------------------------------------------
+  const { data: malUser } = useMalMe();
+  const { data: malEntries = [] } = useMalList(undefined, 100);
+  const malUpdate = useMalUpdateEntry();
+  const malAdd = useMalAddEntry();
+  const malRemove = useMalRemoveEntry();
+  const malProgress = useMalProgress();
+  const malEntry = malEntries.find((e) => e.animeId === d?.mal_id);
 
   const d = fullAnime ?? anime;
 
@@ -342,6 +360,10 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
     const isHls = source.type === 'hls' || source.type === 'hls-redirect';
     const handleEnded = () => {
       if (!d?.mal_id) return;
+      // Finished an episode — sync MAL episode progress automatically.
+      if (malUser && malEntry) {
+        malProgress.mutate({ animeId: d.mal_id, episodeNumber: episode });
+      }
       const next = episodeList.find((e) => e.number === episode + 1);
       if (next) {
         setPlayerStatus(`Auto-playing episode ${next.number}…`);
@@ -518,6 +540,95 @@ const AnimeDetailModal: React.FC<Props> = ({ open, onOpenChange, anime }) => {
                     </Button>
                   )}
                 </div>
+
+                {/* MyAnimeList sync panel */}
+                {malUser ? (
+                  <div className="rounded-xl border border-blue-900/40 bg-[#1a2436] p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-white font-bold flex items-center gap-2">
+                        <Star className="h-4 w-4 text-blue-400" /> MyAnimeList
+                      </h4>
+                      <span className="text-xs text-blue-300">{malUser.name}</span>
+                    </div>
+                    {malEntry ? (
+                      <>
+                        <div className="grid grid-cols-3 gap-2 text-sm text-zinc-300">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs text-zinc-400">Status</span>
+                            <select
+                              value={malEntry.status}
+                              onChange={(e) => malUpdate.mutate({ malAnimeId: malEntry.malAnimeId, patch: { status: e.target.value as typeof malEntry.status } })}
+                              className="rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              {["watching", "completed", "on_hold", "dropped", "plan_to_watch"].map((s) => (
+                                <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs text-zinc-400">Score</span>
+                            <select
+                              value={malEntry.score}
+                              onChange={(e) => malUpdate.mutate({ malAnimeId: malEntry.malAnimeId, patch: { score: Number(e.target.value) } })}
+                              className="rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              {Array.from({ length: 11 }, (_, i) => (
+                                <option key={i} value={i}>{i === 0 ? "—" : `★ ${i}`}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs text-zinc-400">Episodes</span>
+                            <input
+                              type="number"
+                              min={0}
+                              value={malEntry.episodesWatched}
+                              onChange={(e) => malUpdate.mutate({ malAnimeId: malEntry.malAnimeId, patch: { episodesWatched: Math.max(0, Number(e.target.value) || 0) } })}
+                              className="rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1.5 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </label>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-zinc-400">
+                            Progress syncs to MyAnimeList automatically when you finish an episode.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-zinc-600 text-zinc-300 hover:text-white"
+                            onClick={() => malRemove.mutate(malEntry.malAnimeId)}
+                            disabled={malRemove.isPending}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </>
+                    ) : d?.malId ? (
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-zinc-400">Not on your MAL list yet.</p>
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                          onClick={() => malAdd.mutate({ malAnimeId: d.malId!, status: "plan_to_watch" })}
+                          disabled={malAdd.isPending}
+                        >
+                          Add to MyAnimeList
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-400">
+                        This title has no MyAnimeList id in the catalog, so it can't be added.
+                      </p>
+                    )}
+                  </div>
+                ) : isAuthenticated ? (
+                  <div className="rounded-xl border border-blue-900/40 bg-[#1a2436] p-4 flex items-center justify-between gap-3">
+                    <p className="text-sm text-zinc-300">Connect MyAnimeList to sync your list here.</p>
+                    <Button asChild size="sm" className="bg-blue-600 hover:bg-blue-700 text-white shrink-0">
+                      <a href={malLoginUrl}>Connect</a>
+                    </Button>
+                  </div>
+                ) : null}
 
                 {/* Playback Options */}
                 <div className="space-y-4">
