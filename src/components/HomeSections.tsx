@@ -114,7 +114,9 @@ const ContinueWatchingRow: React.FC<{ onCardClick: (anime: JikanAnime) => void }
   );
 };
 
-/** "Recently Watched" — backend history, newest first (signed-in only). */
+/** "Recently Watched" — backend history, newest first (signed-in only).
+ *  The backend returns history rows with FLAT anime fields (animeId /
+ *  animeTitle / animeCoverImage / number), not a nested anime object. */
 const RecentlyWatchedRow: React.FC<{ onCardClick: (anime: JikanAnime) => void }> = ({ onCardClick }) => {
   const { isAuthenticated } = useBackendAuth();
   const history = useWatchHistoryList(20);
@@ -128,9 +130,9 @@ const RecentlyWatchedRow: React.FC<{ onCardClick: (anime: JikanAnime) => void }>
       <div className="flex gap-4 overflow-x-auto pb-4">
         {history.data!.map((h) => (
           <UserRowCard
-            key={`${h.episodeId}`}
-            anime={toPartialAnime(h.anime.id, h.anime.title, h.anime.coverImageMedium)}
-            subtitle={h.anime.episode ? `Episode ${h.anime.episode}` : undefined}
+            key={h.id}
+            anime={toPartialAnime(h.animeId, h.animeTitle ?? "Untitled", h.animeCoverImage)}
+            subtitle={h.number != null ? `Episode ${h.number}` : undefined}
             onCardClick={onCardClick}
           />
         ))}

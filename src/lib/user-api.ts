@@ -87,18 +87,16 @@ export interface FavoriteItem {
 export interface HistoryItem {
   id: number;
   episodeId: number;
+  episodeTitle?: string | null;
+  episodeThumbnail?: string | null;
+  number?: number | null;
+  animeId: number;
+  animeTitle?: string | null;
+  animeCoverImage?: string | null;
   progressSeconds?: number | null;
   durationSeconds?: number | null;
   completed?: boolean;
   watchedAt: string;
-  anime: {
-    id: number;
-    title: string;
-    coverImageLarge?: string | null;
-    coverImageMedium?: string | null;
-    episode?: number | null;
-    format?: string | null;
-  };
 }
 
 export interface ContinueWatchingItem {
