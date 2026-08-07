@@ -1,0 +1,17 @@
+# proxy_params — headers to forward to upstream Node services.
+# Copied verbatim from /etc/nginx/proxy_params (Debian default) with host passthrough.
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+
+# Long-running requests (watch streams, searches)
+proxy_connect_timeout 10s;
+proxy_read_timeout 120s;
+proxy_send_timeout 120s;
+
+# Buffering off for streaming endpoints (HLS / watch streams)
+proxy_buffering off;
+
+# Do not cache by default; endpoints that need caching set their own headers.
+proxy_http_version 1.1;
