@@ -1,0 +1,19 @@
+# Netlify build & deploy configuration for the Capture Anime frontend.
+# This file is committed to the repo so Netlify's CI picks up the build
+# command, publish directory, and the backend URL baked into the bundle.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Bake the backend API base URL into the bundle at build time.
+# Vite exposes any VITE_* variable from the build environment via
+# import.meta.env, so this becomes the app's API_BASE.
+#
+# NOTE: this is a home-LAN address. The public https://capture-anime.netlify.app
+# site can only reach it from inside the home network, and even then browsers
+# block plain-HTTP requests from an HTTPS page as mixed content. Once TLS is
+# live (certbot / Cloudflare Tunnel), switch this to:
+#   VITE_API_URL = "https://api.captureordie.online"
+[context.production.environment]
+  VITE_API_URL = "http://192.168.0.193:3000"
